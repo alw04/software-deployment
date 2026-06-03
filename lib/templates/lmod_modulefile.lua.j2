@@ -1,0 +1,45 @@
+-- Modulefile generated on {{ generated_date }}
+
+whatis("Name: {{ name }}")
+whatis("Version: {{ version }}")
+whatis("Description: {{ description }}")
+whatis("Homepage: {{ homepage }}")
+
+help([[
+{{ name }}/{{ version }}
+
+Description:
+  {{ description }}
+
+Homepage:
+  {{ homepage }}
+
+Dependencies:
+{% for dep in dependencies %}
+  {{ dep }}
+{% else %}
+  (none)
+{% endfor %}
+
+Conflicts:
+{% for c in conflicts %}
+  {{ c }}
+{% else %}
+  (none)
+{% endfor %}
+
+Generated:
+  {{ generated_date }}
+]])
+
+{% for env_var, path in paths %}
+prepend_path("{{ env_var }}", "{{ path }}")
+{% endfor %}
+
+{% for dep in dependencies %}
+depends_on("{{ dep }}")
+{% endfor %}
+
+{% for c in conflicts %}
+conflict("{{ c }}")
+{% endfor %}
