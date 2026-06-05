@@ -1,12 +1,15 @@
+from __future__ import annotations
+
+import inspect
 import os
+import re
 import shutil
 import subprocess
 import tarfile
+import urllib.request
 import zipfile
 from datetime import date
-from inspect import getdoc
 from pathlib import Path
-from urllib.request import urlretrieve
 
 from lib.dependency import Dependency
 from lib.pkgloader import register_package
@@ -27,9 +30,17 @@ class Package:
     def name(self) -> str:
         return self.__class__.__name__.lower()
 
-    @property
-    def description(self) -> str:
-        return getdoc(self) or ""
+    @classmethod
+    def description(cls) -> str:
+        return inspect.getdoc(cls) or ""
+
+    @classmethod
+    def short_description(cls) -> str:
+        text = " ".join(cls.description().split())
+
+        parts = re.split(r"\.\s+", text, maxsplit=1)
+
+        return parts[0] + ("." if len(parts) > 1 else "")
 
     homepage: str | None = None
     url: str | None = None
@@ -44,11 +55,42 @@ class Package:
         return cls.versions[0]
 
     depends_on: list[Dependency] = []
+
+    @classmethod
+    def dependencies_spec(cls) -> list[Dependency]:
+        deps = []
+
+        for base in reversed(cls.__mro__):
+            deps.extend(getattr(base, "depends_on", []))
+
+        return deps
+
+    @property
+    def build_dependencies(self) -> list[Package]:
+        return [self.dependencies[dep.name] for dep in self.depends_on if "build" in dep.types]
+
+    @property
+    def link_dependencies(self) -> list[Package]:
+        return [self.dependencies[dep.name] for dep in self.depends_on if "link" in dep.types]
+
+    @property
+    def run_dependencies(self) -> list[Package]:
+        return [self.dependencies[dep.name] for dep in self.depends_on if "run" in dep.types]
+
+    def dep(self, name: str) -> Package:
+        return self.dependencies[name]
+
     conflicts: list[str] = []
 
     jobs: int | None = None
 
-    phases: tuple = ()
+    phases: tuple = (
+        "download",
+        "extract",
+        "configure",
+        "build",
+        "install",
+    )
 
     def __init__(self, version, ctx):
         if version is None:
@@ -86,7 +128,7 @@ class Package:
         env = os.environ.copy()
         env.update(self.env)
 
-        subprocess.run(args, check=True, cwd=cwd, env=env)
+        subprocess.run(args, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=None, text=True, check=True)
 
     def url_for_version(self, version: str) -> str:
         if self.url is None:
@@ -119,7 +161,7 @@ class Package:
         if tmp.exists():
             tmp.unlink()
 
-        urlretrieve(url, tmp)
+        urllib.request.urlretrieve(url, tmp)
         tmp.replace(self.download_path)
 
     def extract(self):
@@ -149,13 +191,23 @@ class Package:
                     if not m.name or m.name == ".":
                         continue
 
-                    if ".." in m.name:
-                        continue
-
                     p = Path(m.name)
 
                     if strip and p.parts and p.parts[0] == strip_dir:
                         p = Path(*p.parts[1:])
+
+                    if not p or str(p) in (".", ""):
+                        continue
+
+                    if p.is_absolute():
+                        continue
+
+                    if ".." in p.parts:
+                        continue
+
+                    if (m.issym() or m.islnk()) and m.linkname:
+                        if Path(m.linkname).is_absolute():
+                            continue
 
                     if not p:
                         continue
@@ -167,13 +219,13 @@ class Package:
             raise ValueError(f"{self.name}: unknown archive format: {self.download_path}")
 
     def configure(self):
-        raise NotImplementedError
+        pass
 
     def build(self):
-        raise NotImplementedError
+        pass
 
     def install(self):
-        raise NotImplementedError
+        raise NotImplementedError(f"{self.name}: install() not implemented")
 
     module_path_map: dict[str, str] = {
         "bin": "PATH",
@@ -211,9 +263,10 @@ class Package:
         context = {
             "name": self.name,
             "version": self.version,
-            "description": self.description,
+            "description": self.description().replace("\n", "\n  "),
+            "short_description": self.short_description(),
             "homepage": self.homepage,
-            "dependencies": self.dependencies,
+            "dependencies": self.run_dependencies,
             "conflicts": self.conflicts,
             "paths": self.module_paths,
             "generated_date": date.today().isoformat(),
@@ -230,19 +283,9 @@ class Package:
     def run(self):
         for phase in self.phases:
             method = getattr(self, phase)
+            print(f"{self.name}@{self.version} {phase}")
             # method = getattr(self, phase, None)
             # if method is None:
             #     raise ValueError(f"{self.name}: unknown phase '{phase}'")
-
-            if phase in {"configure", "build", "install"}:
-                marker = self.build_dir / f".{phase}"
-
-                if marker.exists() and not self.ctx.args.force:
-                    continue
-
-                method()
-                marker.touch()
-            else:
-                method()
-
-        self.write_modulefile()
+            method()
+            self.write_modulefile()

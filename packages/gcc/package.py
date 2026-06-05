@@ -23,7 +23,7 @@ class Gcc(AutotoolsPackage):
         return [
             "--enable-languages=c,c++,fortran",
             "--disable-multilib",
-            f"--with-gmp={self.dependencies['gmp'].prefix}",
-            f"--with-mpfr={self.dependencies['mpfr'].prefix}",
-            f"--with-mpc={self.dependencies['mpc'].prefix}",
+            f"--with-gmp={self.dep('gmp').prefix}",
+            f"--with-mpfr={self.dep('mpfr').prefix}",
+            f"--with-mpc={self.dep('mpc').prefix}",
         ]

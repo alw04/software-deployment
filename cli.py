@@ -1,19 +1,13 @@
 import argparse
-from dataclasses import dataclass
+import textwrap
 from pathlib import Path
-from textwrap import dedent
 
 from jinja2 import Environment, FileSystemLoader
 
 from lib.config import Config
 from lib.package import Package
-from lib.pkgloader import PACKAGE_REGISTRY, get_package, load_all_recipes
-
-
-@dataclass
-class PackageSpec:
-    name: str
-    version: str | None = None
+from lib.pkgloader import PACKAGE_REGISTRY, get_package, load_all_packages
+from lib.spec import parse_spec
 
 
 class Context:
@@ -29,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="cli.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=dedent(
+        epilog=textwrap.dedent(
             """\
             Examples:
                 # Install individual packages
@@ -64,7 +58,13 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
-    parser.add_argument("--config", default="config.toml", type=Path, metavar="PATH", help="Path to config file")
+    parser.add_argument(
+        "--config",
+        default=Path(__file__).with_name("config.toml"),
+        type=Path,
+        metavar="PATH",
+        help="Path to config file",
+    )
 
     subparser = parser.add_subparsers(dest="command", required=True)
 
@@ -85,7 +85,11 @@ def parse_args() -> argparse.Namespace:
         help="Install a predefined group of packages (e.g. common, sequence_tools)",
     )
     install_parser.add_argument("-f", "--force", action="store_true", help="Force rebuild even if already installed")
-    install_parser.add_argument("--dry-run", action="store_true", help="Show what would be installed without executing")
+    install_parser.add_argument("--dry-run", action="store_true", help="Show the install process without executing")
+    install_parser.add_argument(
+        "-v", "--verbose", action="count", default=0, help="Increase output verbosity (-v for verbose, -vv for debug)"
+    )
+    install_parser.add_argument("--debug", action="store_true", help="Enable debug output (same as -vv)")
     install_parser.set_defaults(handler=cmd_install)
 
     list_parser = subparser.add_parser(
@@ -109,13 +113,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_spec(spec: str) -> PackageSpec:
-    if "@" in spec:
-        name, version = spec.split("@", 1)
-        return PackageSpec(name.strip(), version.strip())
-    return PackageSpec(spec.strip())
-
-
 def install_package(pkg: Package, installed: dict):
     key = (pkg.name, pkg.version)
 
@@ -124,7 +121,7 @@ def install_package(pkg: Package, installed: dict):
 
     installed[key] = pkg
 
-    for dep in pkg.depends_on:
+    for dep in pkg.dependencies_spec():
         dep_cls = get_package(dep.name, required_by=pkg.name)
 
         dep_pkg = dep_cls(dep.version, pkg.ctx)
@@ -150,7 +147,7 @@ def cmd_install(ctx: Context):
 
 def cmd_list(ctx: Context):
     if not PACKAGE_REGISTRY:
-        load_all_recipes()
+        load_all_packages()
 
     if not PACKAGE_REGISTRY:
         print("No packages found in the registry.")
@@ -168,16 +165,19 @@ def cmd_list(ctx: Context):
 def cmd_info(ctx: Context):
     spec = parse_spec(ctx.args.package)
     pkg_cls = get_package(spec.name)
-    pkg = pkg_cls(spec.version, ctx)
 
     INDENT = "    "
 
-    description = pkg.description.replace("\n", f"\n{INDENT}")
+    description = pkg_cls.description().replace("\n", f"\n{INDENT}")
     versions = "\n".join(f"{INDENT}{v}" for v in pkg_cls.versions)
-    deps = "\n".join(f"{INDENT}{d.name}" for d in pkg_cls.depends_on) if pkg_cls.depends_on else f"{INDENT}(none)"
+    deps = (
+        "\n".join(f"{INDENT}{d.name} [{', '.join(d.types)}]" for d in pkg_cls.depends_on)
+        if pkg_cls.depends_on
+        else f"{INDENT}(none)"
+    )
 
     output = f"""\
-Package: {pkg.name}
+Package: {spec.name}
 
 Description:
     {description}

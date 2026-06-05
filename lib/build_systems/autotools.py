@@ -14,8 +14,12 @@ class AutotoolsPackage(Package):
         "install",
     )
 
-    def setup_build_env(self):
-        for dep in self.dependencies.values():
+    def build_env(self):
+        for dep in self.build_dependencies:
+            bin_path = Path(dep.prefix) / "bin"
+            self.env["PATH"] = f"{bin_path}:{self.env.get('PATH', '')}"
+
+        for dep in self.link_dependencies:
             prefix = Path(dep.prefix)
 
             include = prefix / "include"
@@ -42,6 +46,8 @@ class AutotoolsPackage(Package):
             if pc_path:
                 self.env["PKG_CONFIG_PATH"] = self.env.get("PKG_CONFIG_PATH", "") + f":{pc_path}"
 
+    configure_directory = "."
+
     def configure_args(self) -> list[str]:
         return []
 
@@ -52,10 +58,16 @@ class AutotoolsPackage(Package):
         return []
 
     def configure(self):
-        self.run_cmd(["./configure", f"--prefix={self.prefix}", *self.configure_args()], cwd=self.build_dir)
+        self.build_env()  # FIXME
+        self.run_cmd(
+            ["./configure", f"--prefix={self.prefix}", *self.configure_args()],
+            cwd=self.build_dir / self.configure_directory,
+        )
 
     def build(self):
-        self.run_cmd(["make", f"-j{self.build_jobs()}", *self.make_args()], cwd=self.build_dir)
+        self.run_cmd(
+            ["make", f"-j{self.build_jobs()}", *self.make_args()], cwd=self.build_dir / self.configure_directory
+        )
 
     def install(self):
-        self.run_cmd(["make", "install", *self.install_args()], cwd=self.build_dir)
+        self.run_cmd(["make", "install", *self.install_args()], cwd=self.build_dir / self.configure_directory)

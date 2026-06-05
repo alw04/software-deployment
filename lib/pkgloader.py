@@ -1,7 +1,5 @@
-import importlib
-import pkgutil
-
-import recipes
+import importlib.util
+from pathlib import Path
 
 PACKAGE_REGISTRY = {}
 
@@ -19,14 +17,29 @@ def register_package(cls):
     return cls
 
 
-def load_all_recipes():
-    for module in pkgutil.iter_modules(recipes.__path__, recipes.__name__ + "."):
-        importlib.import_module(module.name)
+def load_all_packages():
+    packages_dir = Path(__file__).resolve().parents[1] / "packages"
+
+    for pkg_dir in packages_dir.iterdir():
+        if not pkg_dir.is_dir():
+            continue
+
+        pkg_file = pkg_dir / "package.py"
+        if not pkg_file.is_file():
+            continue
+
+        spec = importlib.util.spec_from_file_location(f"packages.{pkg_dir.name}", pkg_file)
+
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load package: {pkg_dir.name}")
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
 
 
 def get_package(name: str, *, required_by: str | None = None):
     if not PACKAGE_REGISTRY:
-        load_all_recipes()
+        load_all_packages()
 
     pkg_key = name.lower()
     if pkg_key not in PACKAGE_REGISTRY:
