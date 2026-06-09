@@ -18,12 +18,11 @@ class Apptainer(AutotoolsPackage):
 
     depends_on = [
         Dependency("go", type="build"),
-        # Dependency("gocryptfs"),
-        # Dependency("squashfuse"),
+        Dependency("gocryptfs"),
+        Dependency("squashfuse"),
     ]
 
     def configure(self):
-        self.build_env()
         self.run_cmd(
             [
                 "./mconfig",

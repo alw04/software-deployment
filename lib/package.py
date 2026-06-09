@@ -44,6 +44,7 @@ class Package:
 
     homepage: str | None = None
     url: str | None = None
+    urls_by_version: dict[str, str] | None = None
 
     versions: list[str] = []
 
@@ -106,35 +107,44 @@ class Package:
         self.version = version
         self.ctx = ctx
         self.dependencies: dict[str, Package] = {}
-        self.env: dict[str, str] = {}
+        self.env: dict[str, str] = dict(os.environ)
+
+    @property
+    def root(self):
+        return self.ctx.config.software_root
 
     @property
     def prefix(self) -> Path:
-        return self.ctx.config.apps / self.name / self.version
+        return self.root / self.ctx.config.apps / self.name / self.version
 
     @property
     def build_dir(self) -> Path:
-        return self.ctx.config.builds / self.name / self.version
+        return self.root / self.ctx.config.builds / self.name / self.version
 
     @property
     def download_dir(self) -> Path:
-        return self.ctx.config.downloads / self.name / self.version
+        return self.root / self.ctx.config.downloads / self.name / self.version
 
     @property
     def modulefile(self) -> Path:
-        return self.ctx.config.modulefiles / self.name / f"{self.version}.lua"
+        return self.root / self.ctx.config.modulefiles / self.name / f"{self.version}.lua"
 
     def run_cmd(self, args: list[str], *, cwd=None):
-        env = os.environ.copy()
-        env.update(self.env)
-
-        subprocess.run(args, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=None, text=True, check=True)
+        subprocess.run(args, cwd=cwd, env=self.env, stdout=subprocess.PIPE, stderr=None, text=True, check=True)
 
     def url_for_version(self, version: str) -> str:
-        if self.url is None:
-            raise NotImplementedError(f"{self.name} must define 'url' or override url_for_version()")
+        if self.urls_by_version is not None:
+            try:
+                return self.urls_by_version[version]
+            except KeyError:
+                raise ValueError(f"{self.name}: no download URL defined for version '{version}'") from None
 
-        return self.url.format(version=version)
+        if self.url is not None:
+            return self.url.format(version=version)
+
+        raise NotImplementedError(
+            f"{self.name}: no download URL source defined (set 'url', 'urls_by_version', or override url_for_version()"
+        )
 
     def build_jobs(self) -> int:
         if self.jobs is not None:
@@ -227,6 +237,21 @@ class Package:
     def install(self):
         raise NotImplementedError(f"{self.name}: install() not implemented")
 
+    def append_env(self, key: str, value: str, sep: str = " "):
+        if self.env.get(key):
+            self.env[key] += f"{sep}{value}"
+        else:
+            self.env[key] = value
+
+    def apply_build_path(self):
+        for dep in self.build_dependencies:
+            bin_dir = Path(dep.prefix) / "bin"
+            if bin_dir.is_dir():
+                self.append_env("PATH", str(bin_dir), sep=":")
+
+    def apply_link_env(self):
+        pass
+
     module_path_map: dict[str, str] = {
         "bin": "PATH",
         "sbin": "PATH",
@@ -281,6 +306,9 @@ class Package:
         tmp.replace(self.modulefile)
 
     def run(self):
+        self.apply_build_path()
+        self.apply_link_env()
+
         for phase in self.phases:
             method = getattr(self, phase)
             print(f"{self.name}@{self.version} {phase}")

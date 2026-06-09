@@ -15,10 +15,10 @@ class Config:
         self.software_root = Path(paths["software_root"])
         self.container_root = Path(paths["container_root"])
 
-        self.apps = self.software_root / paths["apps_dir"]
-        self.downloads = self.software_root / paths["downloads_dir"]
-        self.builds = self.software_root / paths["builds_dir"]
-        self.modulefiles = self.software_root / paths["modulefiles_dir"]
+        self.apps = paths["apps_dir"]
+        self.downloads = paths["downloads_dir"]
+        self.builds = paths["builds_dir"]
+        self.modulefiles = paths["modulefiles_dir"]
 
         build = data.get("build", {})
         self.jobs = build.get("jobs", "auto")

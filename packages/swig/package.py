@@ -1,0 +1,19 @@
+from lib.build_systems.autotools import AutotoolsPackage
+
+
+class Swig(AutotoolsPackage):
+    """SWIG is an interface compiler that connects programs written in
+    C and C++ with scripting languages such as Perl, Python, Ruby,
+    and Tcl. It works by taking the declarations found in C/C++
+    header files and using them to generate the wrapper code that
+    scripting languages need to access the underlying C/C++
+    code. In addition, SWIG provides a variety of customization
+    features that let you tailor the wrapping process to suit your
+    application."""
+
+    homepage = "https://www.swig.org"
+    url = "https://prdownloads.sourceforge.net/swig/swig-{version}.tar.gz"
+
+    versions = [
+        "4.1.0",
+    ]
