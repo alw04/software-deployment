@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import logging
 import math
 import shutil
 import textwrap
@@ -19,8 +20,27 @@ class Context:
         self.config = config
         self.args = args
 
-        TEMPLATE_DIR = Path(__file__).resolve().parent / "lib" / "templates"
-        self.jinja_env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), trim_blocks=True, lstrip_blocks=True)
+        self.log = logging.getLogger("sd")
+
+        root_dir = Path(__file__).resolve().parent
+        self.jinja_env = Environment(
+            loader=FileSystemLoader(
+                [
+                    root_dir / "lib" / "templates",
+                    root_dir / "packages",
+                ]
+            ),
+            trim_blocks=True,
+            lstrip_blocks=True,
+        )
+
+    @property
+    def verbose(self) -> bool:
+        return getattr(self.args, "verbose", 0) >= 1
+
+    @property
+    def debug(self) -> bool:
+        return getattr(self.args, "debug", False) or getattr(self.args, "verbose", 0) >= 2
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,34 +50,39 @@ def parse_args() -> argparse.Namespace:
         epilog=textwrap.dedent(
             """\
             Examples:
-                # Install individual packages
+                # Install default version
                 %(prog)s install python
-                %(prog)s install python r gcc@15.2.0
 
-                # Install from groups
+                # Install specific versions
+                %(prog)s install gcc@15.2.0 cmake@3.30.9
+
+                # Install a full group
                 %(prog)s install --group common
+
+                # Install multiple groups
                 %(prog)s install --group common --group sequence_tools
 
-                # Mix packages and groups
-                %(prog)s install python --group common
-                %(prog)s install python gcc --group common --group sequence_tools
-
-                # Force rebuild
-                %(prog)s install python --force
-                %(prog)s install python --group common --force
-
-                # Dry run (show what would be installed)
-                %(prog)s install python gcc --dry-run
+                # Preview installation without executing
                 %(prog)s install --group common --dry-run
 
                 # List available packages
                 %(prog)s list
-                %(prog)s list --group common
-                %(prog)s list --group common --group sequence_tools
 
-                # Show package info
+                # Filter list by group
+                %(prog)s list --group common
+
+                # Inspect package metadata and dependencies
                 %(prog)s info python
-                %(prog)s info python@3.14.0
+                %(prog)s info r@4.5.1
+
+                # Regenerate modulefiles for all installed packages
+                %(prog)s modules regenerate --all
+
+                # Regenerate modulefiles for specific installed packages
+                %(prog)s modules regenerate gcc python@3.14.0
+
+                # Preview modulefile regeneration without writing
+                %(prog)s modules regenerate --all --dry-run
             """
         ),
     )
@@ -99,7 +124,7 @@ def parse_args() -> argparse.Namespace:
     list_parser = subparser.add_parser(
         "list",
         help="List available packages in the registry",
-        description="Show available packages in the registry",
+        description="List available packages in the registry",
     )
     list_parser.add_argument(
         "--group", action="append", metavar="GROUP", help="Filter packages by group (e.g. common, sequence_tools)"
@@ -114,36 +139,126 @@ def parse_args() -> argparse.Namespace:
     info_parser.add_argument("package", metavar="package[@version]", help="Package to inspect (e.g. r or r@4.5.1)")
     info_parser.set_defaults(handler=cmd_info)
 
+    modules_parser = subparser.add_parser("modules", help="Manage modulefiles", description="Manage modulefiles")
+
+    modules_subparser = modules_parser.add_subparsers(dest="modules_command", required=True)
+
+    modules_regenerate = modules_subparser.add_parser(
+        "regenerate",
+        help="Regenerate modulefiles for selected packages",
+        description="Regenerate modulefiles for selected packages",
+    )
+    modules_regenerate.add_argument(
+        "packages", nargs="*", metavar="package[@version]", help="Package(s) to regenerate modulefiles for"
+    )
+    modules_regenerate.add_argument(
+        "--all", action="store_true", help="Regenerate modulefiles for all installed packages"
+    )
+    modules_regenerate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show which modulefiles would be regenerated without writing them",
+    )
+    modules_regenerate.set_defaults(handler=cmd_modules_regenerate)
+
     args = parser.parse_args()
 
     if args.command == "install" and not (args.packages or args.group):
         parser.error("install requires at least one package or -g/--group")
 
+    if args.command == "modules" and args.modules_command == "regenerate":
+        if not (args.packages or args.all):
+            parser.error("modules regenerate requires at least one package or --all")
+
     return args
 
 
-def install_package(pkg: Package, installed: dict):
-    key = (pkg.name, pkg.version)
+def cmd_modules_regenerate(ctx: Context):
+    if not PACKAGE_REGISTRY:
+        load_all_packages()
 
-    if key in installed:
-        return installed[key]
+    targets = []
 
-    installed[key] = pkg
+    if ctx.args.all:
+        for pkg_cls in PACKAGE_REGISTRY.values():
+            for version in pkg_cls.versions:
+                pkg = pkg_cls(version, ctx)
+                if pkg.prefix.exists():
+                    targets.append(pkg)
 
-    for dep in pkg.dependencies_spec():
-        dep_cls = get_package(dep.name, required_by=pkg.name)
+    else:
+        for package in ctx.args.packages:
+            spec = parse_spec(package)
 
-        dep_pkg = dep_cls(dep.version, pkg.ctx)
+            pkg_cls = get_package(spec.name)
+            pkg = pkg_cls(spec.version, ctx)
 
-        install_package(dep_pkg, installed)
+            if not pkg.prefix.exists():
+                print(f"Skipping {pkg.name}@{pkg.version} (not installed)")
+                continue
 
-        pkg.dependencies[dep.name] = dep_pkg
+            targets.append(pkg)
 
-    pkg.run()
+    if not targets:
+        print("No installed packages found to regenerate")
+        return
+
+    for pkg in targets:
+        print(f"==> {pkg.name}@{pkg.version}")
+
+        if ctx.args.dry_run:
+            continue
+
+        for dep in pkg.dependencies_spec():
+            dep_cls = get_package(dep.name, required_by=pkg.name)
+            dep_pkg = dep_cls(dep.version, ctx)
+
+            pkg.dependencies[dep.name] = dep_pkg
+
+        pkg.write_modulefile()
+
+    if ctx.args.dry_run:
+        print(f"\nWould regenerate the {len(targets)} modulefile(s) shown above")
+    else:
+        print(f"\nRegenerated {len(targets)} modulefile(s)")
 
 
-def cmd_install(ctx: Context):
-    installed = {}
+def build_install_plan(ctx: Context) -> list[Package]:
+    plan = []
+    seen = set()
+    visiting = set()
+    stack = []
+
+    def visit(pkg: Package):
+        key = (pkg.name, pkg.version)
+
+        if key in visiting:
+            start = stack.index(key)
+            cycle = stack[start:] + [key]
+            chain = " -> ".join(f"{n}@{v}" for n, v in cycle)
+            raise ValueError(f"dependency cycle detected: {chain}")
+
+        if key in seen:
+            return
+
+        visiting.add(key)
+        stack.append(key)
+
+        try:
+            for dep in pkg.dependencies_spec():
+                dep_cls = get_package(dep.name, required_by=pkg.name)
+                dep_pkg = dep_cls(dep.version, ctx)
+
+                pkg.dependencies[dep.name] = dep_pkg
+
+                visit(dep_pkg)
+
+            seen.add(key)
+            plan.append(pkg)
+
+        finally:
+            stack.pop()
+            visiting.remove(key)
 
     for package in ctx.args.packages:
         spec = parse_spec(package)
@@ -151,7 +266,22 @@ def cmd_install(ctx: Context):
         pkg_cls = get_package(spec.name)
         pkg = pkg_cls(spec.version, ctx)
 
-        install_package(pkg, installed)
+        visit(pkg)
+
+    return plan
+
+
+def cmd_install(ctx: Context):
+    plan = build_install_plan(ctx)
+
+    if ctx.args.dry_run:
+        print("Install plan:")
+        for pkg in plan:
+            print(f"  {pkg.name}@{pkg.version}")
+        return
+
+    for pkg in plan:
+        pkg.run()
 
 
 def cmd_list(ctx: Context):
@@ -232,11 +362,34 @@ Dependencies:
     print(output)
 
 
+def setup_logging(args: argparse.Namespace):
+    verbose = getattr(args, "verbose", 0)
+    debug = getattr(args, "debug", False)
+
+    if debug or verbose >= 2:
+        level = logging.DEBUG
+    elif verbose >= 1:
+        level = logging.INFO
+    else:
+        level = logging.WARNING
+
+    logging.basicConfig(
+        level=level,
+        format="[%(levelname)s] %(message)s",
+        # format="[%(asctime)s] [%(levelname)s] %(message)s",
+        # datefmt="%H:%M:%S",
+    )
+
+
 def main():
     args = parse_args()
     config = Config(args.config)
 
+    setup_logging(args)
+
     ctx = Context(config, args)
+
+    ctx.log.debug("config file = %s", args.config)
 
     args.handler(ctx)
 

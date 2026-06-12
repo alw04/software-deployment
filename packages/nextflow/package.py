@@ -1,8 +1,8 @@
 from lib.dependency import Dependency
-from lib.package import Package
+from lib.build_systems.binary import BinaryPackage
 
 
-class Nextflow(Package):
+class Nextflow(BinaryPackage):
     """Data-driven computational pipelines."""
 
     homepage = "https://www.nextflow.io"

@@ -15,3 +15,8 @@ class Openjdk(BinaryPackage):
         "21.0.9_10",
         "17.0.19_10",
     ]
+
+    def module_env(self):
+        return {
+            "JAVA_HOME": str(self.prefix),
+        }

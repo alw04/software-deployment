@@ -62,7 +62,7 @@ class CMakePackage(Package):
         )
 
     def build(self):
-        self.run_cmd(["cmake", "--build", str(self.build_path / "build"), "--parallel", str(self.build_jobs())])
+        self.run_cmd(["cmake", "--build", str(self.build_path / "build"), "--parallel", str(self.build_jobs)])
 
     def install(self):
         self.run_cmd(["cmake", "--install", str(self.build_path / "build")])

@@ -19,6 +19,3 @@ class Config:
         self.downloads = paths["downloads_dir"]
         self.builds = paths["builds_dir"]
         self.modulefiles = paths["modulefiles_dir"]
-
-        build = data.get("build", {})
-        self.jobs = build.get("jobs", "auto")

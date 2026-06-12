@@ -19,7 +19,7 @@ class MakefilePackage(Package):
         return []
 
     def build(self):
-        self.run_cmd(["make", f"-j{self.build_jobs()}", *self.make_args()], cwd=self.build_dir)
+        self.run_cmd(["make", f"-j{self.build_jobs}", *self.make_args()], cwd=self.build_dir)
 
     def install(self):
         self.run_cmd(["make", "install", *self.install_args()], cwd=self.build_dir)

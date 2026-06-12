@@ -25,7 +25,7 @@ class Boost(Package):
         self.run_cmd([str(self.build_dir / "bootstrap.sh"), f"--prefix={self.prefix}"], cwd=self.build_dir)
 
     def build(self):
-        self.run_cmd([str(self.build_dir / "b2"), f"-j{self.build_jobs()}"], cwd=self.build_dir)
+        self.run_cmd([str(self.build_dir / "b2"), f"-j{self.build_jobs}"], cwd=self.build_dir)
 
     def install(self):
         self.run_cmd([str(self.build_dir / "b2"), "install", f"--prefix={self.prefix}"], cwd=self.build_dir)

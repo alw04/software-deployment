@@ -6,6 +6,3 @@ apps_dir = "apps"
 downloads_dir = "downloads"
 builds_dir = "builds"
 modulefiles_dir = "modulefiles"
-
-[build]
-jobs = "auto"

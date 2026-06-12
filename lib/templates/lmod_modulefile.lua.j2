@@ -36,6 +36,10 @@ Generated:
 prepend_path("{{ env_var }}", "{{ path }}")
 {% endfor %}
 
+{% for env_var, value in env.items() %}
+setenv("{{ env_var }}", "{{ value }}")
+{% endfor %}
+
 {% for dep in dependencies %}
 depends_on("{{ dep }}")
 {% endfor %}

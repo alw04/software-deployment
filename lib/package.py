@@ -26,6 +26,10 @@ class Package:
 
         register_package(cls)
 
+    @property
+    def log(self):
+        return self.ctx.log
+
     homepage: str | None = None
     url: str | None = None
     urls_by_version: dict[str, str] | None = None
@@ -63,7 +67,9 @@ class Package:
         self.version = version
         self.ctx = ctx
         self.dependencies: dict[str, Package] = {}
-        self.env: dict[str, str] = dict(os.environ)
+        self.env: dict[str, str] = {
+            "PATH": os.environ.get("PATH", ""),
+        }
 
     depends_on: list[Dependency] = []
 
@@ -142,7 +148,29 @@ class Package:
 
     def run_cmd(self, args: list[str], *, cwd: str | Path | None = None, env: dict[str, str] | None = None):
         cmd_env = self.env | (env or {})
-        subprocess.run(args, cwd=cwd, env=cmd_env, stdout=subprocess.PIPE, stderr=None, text=True, check=True)
+
+        cmd_str = " ".join(map(str, args))
+        self.log.info("cmd=%s", cmd_str)
+        self.log.debug("cwd=%s", cwd or os.getcwd())
+        self.log.debug("env=%s", cmd_env)
+
+        if self.ctx.debug:
+            subprocess.run(
+                args,
+                cwd=cwd,
+                env=cmd_env,
+                check=True,
+            )
+        else:
+            subprocess.run(
+                args,
+                cwd=cwd,
+                env=cmd_env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                check=True,
+            )
 
     def install_file(self, src: Path, dst: Path, mode: int | None = None):
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -209,14 +237,14 @@ class Package:
 
     jobs: int | None = None
 
+    @property
     def build_jobs(self) -> int:
-        if self.jobs:
-            return int(self.jobs)
+        if self.jobs is not None:
+            if self.jobs < 1:
+                raise ValueError(f"{self.name}: jobs must be >= 1 (got {self.jobs})")
+            return self.jobs
 
-        if self.ctx.config.jobs == "auto":
-            return os.cpu_count() or 1
-
-        return int(self.ctx.config.jobs)
+        return os.cpu_count() or 1
 
     phases: tuple = (
         "download",
@@ -366,12 +394,15 @@ class Package:
             for var, path_list in extra.items():
                 for path in path_list:
                     if not path.exists():
-                        print(f"{self.name}: skipping missing module path: {var} -> {path}")
+                        self.log.warning(f"skipping missing module path: {var} -> {path}")
                         continue
 
                     paths.append((var, path))
 
         return paths
+
+    def module_env(self) -> dict[str, str]:
+        return {}
 
     def write_modulefile(self):
         template = self.ctx.jinja_env.get_template("lmod_modulefile.lua.j2")
@@ -385,6 +416,7 @@ class Package:
             "dependencies": [dep.name for dep in self.run_dependencies],
             "conflicts": self.conflicts,
             "paths": self.module_paths,
+            "env": self.module_env(),
             "generated_date": date.today().isoformat(),
         }
 
@@ -394,15 +426,13 @@ class Package:
         self.atomic_write(self.modulefile, content)
 
     def run(self):
+        print(f"\n==> {self.name}@{self.version}")
         self.apply_build_path()
         self.apply_link_env()
 
         for phase in self.phases:
-            method = getattr(self, phase)
-            print(f"{self.name}@{self.version} {phase}")
-            # method = getattr(self, phase, None)
-            # if method is None:
-            #     raise ValueError(f"{self.name}: unknown phase '{phase}'")
-            method()
+            print(phase)
+            getattr(self, phase)()
 
+        print("write_modulefile")
         self.write_modulefile()

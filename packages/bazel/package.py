@@ -20,6 +20,11 @@ class Bazel(Package):
         Dependency("openjdk", type=("build", "run")),
     ]
 
+    def module_env(self):
+        return {
+            "JAVA_HOME": str(self.dep("openjdk").prefix),
+        }
+
     def build(self):
         self.run_cmd(
             ["bash", str(self.build_dir / "compile.sh")],
