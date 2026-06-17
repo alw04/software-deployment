@@ -34,18 +34,23 @@ class Package:
     url: str | None = None
     urls_by_version: dict[str, str] | None = None
     versions: list[str] = []
+    jobs: int | None = None
 
     @property
     def name(self) -> str:
         return self.__class__.__name__.lower()
 
     @classmethod
-    def description(cls) -> str:
-        return inspect.getdoc(cls) or ""
+    def description(cls) -> str | None:
+        return inspect.getdoc(cls)
 
     @classmethod
-    def short_description(cls) -> str:
-        text = " ".join(cls.description().split())
+    def short_description(cls) -> str | None:
+        desc = cls.description()
+        if not desc:
+            return None
+
+        text = " ".join(desc.split())
         parts = re.split(r"\.\s+", text, maxsplit=1)
         return parts[0] + ("." if len(parts) > 1 else "")
 
@@ -62,13 +67,16 @@ class Package:
         if version not in self.versions:
             default = self.default_version()
             versions = ", ".join(f"{v} (default)" if v == default else v for v in self.versions)
-            raise ValueError(f"{self.name}: unsupported version '{version}'.\nAvailable versions: {versions}")
+            raise ValueError(f"{self.name}: unsupported version {version!r}.\nAvailable versions: {versions}")
+
+        if self.jobs is not None and (not isinstance(self.jobs, int) or self.jobs < 1):
+            raise ValueError(f"{self.name}: jobs must be an integer >= 1 (got {self.jobs!r})")
 
         self.version = version
         self.ctx = ctx
         self.dependencies: dict[str, Package] = {}
         self.env: dict[str, str] = {
-            "PATH": os.environ.get("PATH", ""),
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
         }
 
     depends_on: list[Dependency] = []
@@ -88,40 +96,53 @@ class Package:
 
     @property
     def build_dependencies(self) -> list[Package]:
-        return [self.dependencies[dep.name] for dep in self.depends_on if "build" in dep.types]
+        return [self.dependencies[dep.name] for dep in self.dependencies_spec() if "build" in dep.types]
 
     @property
     def link_dependencies(self) -> list[Package]:
-        return [self.dependencies[dep.name] for dep in self.depends_on if "link" in dep.types]
+        return [self.dependencies[dep.name] for dep in self.dependencies_spec() if "link" in dep.types]
 
     @property
     def run_dependencies(self) -> list[Package]:
-        return [self.dependencies[dep.name] for dep in self.depends_on if "run" in dep.types]
+        return [self.dependencies[dep.name] for dep in self.dependencies_spec() if "run" in dep.types]
 
     def dep(self, name: str) -> Package:
         return self.dependencies[name]
 
     conflicts: list[str] = []
 
+    @classmethod
+    def conflicts_spec(cls) -> list[str]:
+        seen = set()
+        conflict_list = []
+
+        for base in reversed(cls.__mro__):
+            for conflict in getattr(base, "conflicts", []):
+                if conflict in seen:
+                    continue
+                seen.add(conflict)
+                conflict_list.append(conflict)
+        return conflict_list
+
     @property
-    def root(self):
+    def root(self) -> Path:
         return self.ctx.config.software_root
 
     @property
     def prefix(self) -> Path:
-        return self.root / self.ctx.config.apps / self.name / self.version
+        return self.root / self.ctx.config.APPS_DIR / self.name / self.version
 
     @property
     def build_path(self) -> Path:
-        return self.root / self.ctx.config.builds / self.name / self.version
+        return self.root / self.ctx.config.BUILDS_DIR / self.name / self.version
 
     @property
     def download_path(self) -> Path:
-        return self.root / self.ctx.config.downloads / self.name / self.version
+        return self.root / self.ctx.config.DOWNLOADS_DIR / self.name / self.version
 
     @property
     def modulefile(self) -> Path:
-        return self.root / self.ctx.config.modulefiles / self.name / f"{self.version}.lua"
+        return self.root / self.ctx.config.MODULEFILES_DIR / self.name / f"{self.version}.lua"
 
     source_subdir: str = "."
 
@@ -129,17 +150,23 @@ class Package:
     def build_dir(self) -> Path:
         return self.build_path / self.source_subdir
 
+    @property
+    def build_jobs(self) -> int:
+        return self.jobs or self.ctx.config.jobs
+
     def append_env(self, key: str, value: str, sep: str = " "):
-        if self.env.get(key):
-            self.env[key] += f"{sep}{value}"
-        else:
-            self.env[key] = value
+        existing = self.env.get(key)
+        self.env[key] = f"{existing}{sep}{value}" if existing else value
+
+    def prepend_env(self, key: str, value: str, sep: str = " "):
+        existing = self.env.get(key)
+        self.env[key] = f"{value}{sep}{existing}" if existing else value
 
     def apply_build_path(self):
         for dep in self.build_dependencies:
             bin_dir = Path(dep.prefix) / "bin"
             if bin_dir.is_dir():
-                self.append_env("PATH", str(bin_dir), sep=":")
+                self.prepend_env("PATH", str(bin_dir), sep=":")
 
     link_libs: list[str] = []
 
@@ -149,10 +176,21 @@ class Package:
     def run_cmd(self, args: list[str], *, cwd: str | Path | None = None, env: dict[str, str] | None = None):
         cmd_env = self.env | (env or {})
 
+        term = self.ctx.term
+
         cmd_str = " ".join(map(str, args))
-        self.log.info("cmd=%s", cmd_str)
-        self.log.debug("cwd=%s", cwd or os.getcwd())
-        self.log.debug("env=%s", cmd_env)
+
+        # fmt: off
+        self.log.debug(
+            "Running command:\n"
+            "  Command: %s\n"
+            "  Directory: %s\n"
+            "  Environment: %s",
+            cmd_str,
+            cwd or os.getcwd(),
+            cmd_env,
+        )
+        # fmt: on
 
         if self.ctx.debug:
             subprocess.run(
@@ -162,15 +200,59 @@ class Package:
                 check=True,
             )
         else:
-            subprocess.run(
-                args,
-                cwd=cwd,
-                env=cmd_env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                check=True,
-            )
+            try:
+                subprocess.run(
+                    args,
+                    cwd=cwd,
+                    env=cmd_env,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+
+                def capture_tail(stream_name: str, stream_text: str) -> str:
+                    TAIL_LINES = 50
+
+                    if not stream_text:
+                        return ""
+
+                    lines = stream_text.strip().splitlines()
+                    total_lines = len(lines)
+                    truncated = total_lines > TAIL_LINES
+                    selected_lines = lines[-TAIL_LINES:]
+
+                    stat_label = f" {stream_name} ({min(TAIL_LINES, total_lines)}/{total_lines} lines) "
+                    remaining_width = max(term.columns - len(stat_label) - 10, 10)
+
+                    header = f" {term.dim}------{term.reset}{term.bold}{stat_label}{term.reset}{term.dim}{'-' * remaining_width}{term.reset}\n"
+                    footer = f" {term.dim}{'-' * (term.columns - 4)}{term.reset}\n"
+
+                    block_str = header
+                    if truncated:
+                        block_str += f"    {term.dim}[... older output truncated ...]{term.reset}\n"
+
+                    for line in selected_lines:
+                        block_str += f"    {line}\n"
+
+                    block_str += footer
+                    return block_str
+
+                msg = (
+                    f"Command failed with exit code {e.returncode}\n"
+                    f"  {term.red}Command: {cmd_str}{term.reset}\n"
+                    f"  {term.red}Directory: {cwd or os.getcwd()}{term.reset}\n"
+                    f"  {term.red}Environment: {cmd_env}{term.reset}\n"
+                )
+
+                if e.stdout:
+                    msg += "\n" + capture_tail("STDOUT", e.stdout)
+
+                if e.stderr:
+                    msg += "\n" + capture_tail("STDERR", e.stderr)
+
+                self.log.error(msg)
+                raise
 
     def install_file(self, src: Path, dst: Path, mode: int | None = None):
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -226,7 +308,7 @@ class Package:
             if version in self.urls_by_version:
                 return self.urls_by_version[version]
 
-            raise ValueError(f"{self.name}: no download URL defined for version '{version}'")
+            raise ValueError(f"{self.name}: no download URL defined for version {version!r}")
 
         if self.url:
             return self.url.format(version=version)
@@ -234,17 +316,6 @@ class Package:
         raise NotImplementedError(
             f"{self.name}: no download URL source defined (set 'url', 'urls_by_version', or override url_for_version()"
         )
-
-    jobs: int | None = None
-
-    @property
-    def build_jobs(self) -> int:
-        if self.jobs is not None:
-            if self.jobs < 1:
-                raise ValueError(f"{self.name}: jobs must be >= 1 (got {self.jobs})")
-            return self.jobs
-
-        return os.cpu_count() or 1
 
     phases: tuple = (
         "download",
@@ -260,10 +331,13 @@ class Package:
         filename = url.split("/")[-1]
         self.download_file = self.download_path / filename
 
-        if self.download_file.exists() and not self.ctx.args.force:
+        self.download_path.mkdir(parents=True, exist_ok=True)
+
+        if self.download_file.is_file() and not self.ctx.args.force:
+            self.log.info("skipping download, file already exists: %s", self.download_file)
             return
 
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        self.log.info("downloading file: %s -> %s", url, self.download_file)
 
         tmp = self.download_file.with_name(self.download_file.name + ".part")
 
@@ -273,6 +347,7 @@ class Package:
         try:
             urllib.request.urlretrieve(url, tmp)
             tmp.replace(self.download_file)
+            self.log.info("download complete")
         except Exception:
             if tmp.exists():
                 tmp.unlink()
@@ -280,6 +355,7 @@ class Package:
 
     def extract(self):
         if self.build_path.exists() and not self.ctx.args.force:
+            self.log.info("skipping extract, build directory already exists: %s", self.build_path)
             return
 
         tmp_dir = self.build_path.with_suffix(".tmp")
@@ -291,6 +367,8 @@ class Package:
             shutil.rmtree(self.build_path)
 
         tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        self.log.info("extracting archive: %s -> %s", self.download_file, self.build_path)
 
         try:
             if zipfile.is_zipfile(self.download_file):
@@ -345,6 +423,7 @@ class Package:
                 raise ValueError(f"{self.name}: unknown archive format: {self.download_file}")
 
             tmp_dir.replace(self.build_path)
+            self.log.info("extract complete")
 
         except Exception:
             if tmp_dir.exists():
@@ -404,19 +483,44 @@ class Package:
     def module_env(self) -> dict[str, str]:
         return {}
 
+    shell_functions: dict[str, str] = {}
+
+    def format_shell_command(self, cmd: str) -> str:
+        return cmd
+
+    def render_shell_functions(self) -> dict[str, dict[str, str]]:
+        out = {}
+
+        for name, cmd in self.shell_functions.items():
+            cmd = self.format_shell_command(cmd)
+
+            out[name] = {
+                "bash": f'{cmd} "$@"',
+                "csh": f"{cmd} $*",
+            }
+
+        return out
+
     def write_modulefile(self):
         template = self.ctx.jinja_env.get_template("lmod_modulefile.lua.j2")
+
+        desc = self.description()
+        if desc:
+            desc = desc.replace("\n", "\n  ")
+        else:
+            desc = "(none)"
 
         context = {
             "name": self.name,
             "version": self.version,
-            "description": self.description().replace("\n", "\n  "),
+            "description": desc,
             "short_description": self.short_description(),
-            "homepage": self.homepage,
+            "homepage": self.homepage or "(none)",
             "dependencies": [dep.name for dep in self.run_dependencies],
-            "conflicts": self.conflicts,
+            "conflicts": self.conflicts_spec(),
             "paths": self.module_paths,
             "env": self.module_env(),
+            "shell_functions": self.render_shell_functions(),
             "generated_date": date.today().isoformat(),
         }
 
@@ -424,6 +528,8 @@ class Package:
 
         self.modulefile.parent.mkdir(parents=True, exist_ok=True)
         self.atomic_write(self.modulefile, content)
+
+        self.log.info("wrote modulefile to %s", self.modulefile)
 
     def run(self):
         print(f"\n==> {self.name}@{self.version}")

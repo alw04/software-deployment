@@ -1,5 +1,5 @@
-from lib.dependency import Dependency
 from lib.build_systems.binary import BinaryPackage
+from lib.dependency import Dependency
 
 
 class Nextflow(BinaryPackage):
@@ -10,10 +10,11 @@ class Nextflow(BinaryPackage):
 
     versions = [
         "25.04.6",
+        "26.04.3",
     ]
 
     depends_on = [
-        # Dependency("java", type="run"),
+        Dependency("openjdk", type="run"),
     ]
 
     phases = (

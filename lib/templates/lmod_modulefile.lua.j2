@@ -2,8 +2,9 @@
 
 whatis("Name: {{ name }}")
 whatis("Version: {{ version }}")
-whatis("Description: {{ short_description }}")
-whatis("Homepage: {{ homepage }}")
+{% if short_description %}
+whatis("Short description: {{ short_description }}")
+{% endif %}
 
 help([[
 {{ name }}/{{ version }}
@@ -31,19 +32,33 @@ Conflicts:
 Generated:
   {{ generated_date }}
 ]])
+{% if paths %}
 
 {% for env_var, path in paths %}
 prepend_path("{{ env_var }}", "{{ path }}")
 {% endfor %}
+{% endif %}
+{% if env %}
 
 {% for env_var, value in env.items() %}
 setenv("{{ env_var }}", "{{ value }}")
 {% endfor %}
+{% endif %}
+{% if shell_functions %}
+
+{% for name, cmd in shell_functions.items() %}
+set_shell_function("{{ name }}", '{{ cmd.bash }}', '{{ cmd.csh }}')
+{% endfor %}
+{% endif %}
+{% if dependencies %}
 
 {% for dep in dependencies %}
 depends_on("{{ dep }}")
 {% endfor %}
+{% endif %}
+{% if conflicts %}
 
 {% for c in conflicts %}
 conflict("{{ c }}")
 {% endfor %}
+{% endif %}

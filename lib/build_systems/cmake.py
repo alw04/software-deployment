@@ -23,22 +23,25 @@ class CMakePackage(Package):
         for dep in self.link_dependencies:
             prefix = Path(dep.prefix)
 
-            self.append_env("CMAKE_PREFIX_PATH", str(prefix), sep=":")
+            self.prepend_env("CMAKE_PREFIX_PATH", str(prefix), sep=":")
 
             include = prefix / "include"
             if include.is_dir():
-                self.append_env("CMAKE_INCLUDE_PATH", str(include), sep=":")
+                self.prepend_env("CMAKE_INCLUDE_PATH", str(include), sep=":")
 
             for libdir in ("lib", "lib64"):
                 lib = prefix / libdir
 
                 if lib.is_dir():
-                    self.append_env("CMAKE_LIBRARY_PATH", str(lib), sep=":")
-                    self.append_env("LDFLAGS", f"-L{lib} -Wl,-rpath,{lib}")
+                    self.prepend_env("CMAKE_LIBRARY_PATH", str(lib), sep=":")
+                    self.prepend_env("LDFLAGS", f"-L{lib} -Wl,-rpath,{lib}")
 
                 pkgconfig = lib / "pkgconfig"
                 if pkgconfig.is_dir():
-                    self.append_env("PKG_CONFIG_PATH", str(pkgconfig), sep=":")
+                    self.prepend_env("PKG_CONFIG_PATH", str(pkgconfig), sep=":")
+
+        for lib_name in self.link_libs:
+            self.append_env("LDFLAGS", f"-l{lib_name}")
 
     def extra_module_paths(self):
         return {

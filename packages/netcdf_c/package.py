@@ -17,3 +17,7 @@ class NetcdfC(CMakePackage):
     depends_on = [
         Dependency("hdf5"),
     ]
+
+    link_libs = [
+        "hdf5",
+    ]

@@ -1,8 +1,8 @@
+from lib.build_systems.binary import BinaryPackage
 from lib.dependency import Dependency
-from lib.package import Package
 
 
-class Bazel(Package):
+class Bazel(BinaryPackage):
     """Bazel is an open-source build and test tool similar to Make, Maven, and
     Gradle. It uses a human-readable, high-level build language. Bazel supports
     projects in multiple languages and builds outputs for multiple platforms.
@@ -10,14 +10,15 @@ class Bazel(Package):
     numbers of users."""
 
     homepage = "https://bazel.build/"
-    url = "https://github.com/bazelbuild/bazel/releases/download/{version}/bazel-{version}-dist.zip"
+    url = "https://github.com/bazelbuild/bazel/releases/download/{version}/bazel-{version}-linux-x86_64"
 
     versions = [
+        "9.1.1",
         "7.4.1",
     ]
 
     depends_on = [
-        Dependency("openjdk", type=("build", "run")),
+        Dependency("openjdk", type="run"),
     ]
 
     def module_env(self):
@@ -25,14 +26,5 @@ class Bazel(Package):
             "JAVA_HOME": str(self.dep("openjdk").prefix),
         }
 
-    def build(self):
-        self.run_cmd(
-            ["bash", str(self.build_dir / "compile.sh")],
-            cwd=self.build_dir,
-            env={
-                "EXTRA_BAZEL_ARGS": "--tool_java_runtime_version=local_jdk",
-            },
-        )
-
     def install(self):
-        self.install_binary(self.build_dir / "output" / "bazel")
+        self.install_binary(self.download_file, name="bazel")

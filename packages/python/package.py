@@ -19,5 +19,5 @@ class Python(AutotoolsPackage):
         ]
 
     conflicts = [
-        "miniconda",
+        "miniconda3",
     ]

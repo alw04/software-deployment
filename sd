@@ -3,7 +3,9 @@
 import argparse
 import logging
 import math
+import os
 import shutil
+import sys
 import textwrap
 from pathlib import Path
 
@@ -15,11 +17,76 @@ from lib.pkgloader import PACKAGE_REGISTRY, get_package, load_all_packages
 from lib.spec import parse_spec
 
 
+class TermInfo:
+    BLACK = 30
+    RED = 31
+    GREEN = 32
+    YELLOW = 33
+    BLUE = 34
+    MAGENTA = 35
+    CYAN = 36
+    WHITE = 37
+
+    def __init__(self):
+        self.supports_color = self.check_color_support()
+
+        self.reset = "\033[0m" if self.supports_color else ""
+        self.bold = "\033[1m" if self.supports_color else ""
+        self.dim = "\033[2m" if self.supports_color else ""
+
+        self.black = self.fg(self.BLACK)
+        self.red = self.fg(self.RED)
+        self.green = self.fg(self.GREEN)
+        self.yellow = self.fg(self.YELLOW)
+        self.blue = self.fg(self.BLUE)
+        self.magenta = self.fg(self.MAGENTA)
+        self.cyan = self.fg(self.CYAN)
+        self.white = self.fg(self.WHITE)
+
+        self.bg_black = self.bg(self.BLACK)
+        self.bg_red = self.bg(self.RED)
+        self.bg_green = self.bg(self.GREEN)
+        self.bg_yellow = self.bg(self.YELLOW)
+        self.bg_blue = self.bg(self.BLUE)
+        self.bg_magenta = self.bg(self.MAGENTA)
+        self.bg_cyan = self.bg(self.CYAN)
+        self.bg_white = self.bg(self.WHITE)
+
+    def fg(self, code: int) -> str:
+        return f"\033[{code}m" if self.supports_color else ""
+
+    def bg(self, code: int) -> str:
+        return f"\033[{code + 10}m" if self.supports_color else ""
+
+    def check_color_support(self) -> bool:
+        if "NO_COLOR" in os.environ:
+            return False
+        if "FORCE_COLOR" in os.environ:
+            return True
+        if not (hasattr(sys.stdout, "isatty") and sys.stdout.isatty()):
+            return False
+        if os.environ.get("COLORTERM") in ("truecolor", "24bit"):
+            return True
+
+        term = os.environ.get("TERM", "").lower()
+        color_terms = ("color", "ansi", "xterm", "screen", "tmux", "linux")
+        return any(keyword in term for keyword in color_terms)
+
+    @property
+    def columns(self) -> int:
+        return shutil.get_terminal_size(fallback=(80, 24)).columns
+
+    @property
+    def rows(self) -> int:
+        return shutil.get_terminal_size(fallback=(80, 24)).lines
+
+
 class Context:
-    def __init__(self, config: Config, args: argparse.Namespace):
-        self.config = config
+    def __init__(self, args: argparse.Namespace):
         self.args = args
 
+        self.term = TermInfo()
+        self.config = Config(args.config)
         self.log = logging.getLogger("sd")
 
         root_dir = Path(__file__).resolve().parent
@@ -178,26 +245,56 @@ def cmd_modules_regenerate(ctx: Context):
         load_all_packages()
 
     targets = []
+    seen = set()
+
+    def add_target(pkg: Package):
+        key = (pkg.name, pkg.version)
+
+        if key in seen:
+            return
+
+        seen.add(key)
+        targets.append(pkg)
 
     if ctx.args.all:
         for pkg_cls in PACKAGE_REGISTRY.values():
             for version in pkg_cls.versions:
                 pkg = pkg_cls(version, ctx)
-                if pkg.prefix.exists():
-                    targets.append(pkg)
+
+                if not pkg.prefix.exists():
+                    continue
+
+                add_target(pkg)
 
     else:
         for package in ctx.args.packages:
             spec = parse_spec(package)
 
             pkg_cls = get_package(spec.name)
-            pkg = pkg_cls(spec.version, ctx)
 
-            if not pkg.prefix.exists():
-                print(f"Skipping {pkg.name}@{pkg.version} (not installed)")
-                continue
+            if spec.all_versions:
+                found = False
 
-            targets.append(pkg)
+                for version in pkg_cls.versions:
+                    pkg = pkg_cls(version, ctx)
+
+                    if not pkg.prefix.exists():
+                        continue
+
+                    found = True
+                    add_target(pkg)
+
+                if not found:
+                    print(f"No installed versions of {spec.name} found")
+
+            else:
+                pkg = pkg_cls(spec.version, ctx)
+
+                if not pkg.prefix.exists():
+                    print(f"Skipping {pkg.name}@{pkg.version} (not installed)")
+                    continue
+
+                add_target(pkg)
 
     if not targets:
         print("No installed packages found to regenerate")
@@ -264,9 +361,14 @@ def build_install_plan(ctx: Context) -> list[Package]:
         spec = parse_spec(package)
 
         pkg_cls = get_package(spec.name)
-        pkg = pkg_cls(spec.version, ctx)
 
-        visit(pkg)
+        if spec.all_versions:
+            for version in pkg_cls.versions:
+                pkg = pkg_cls(version, ctx)
+                visit(pkg)
+        else:
+            pkg = pkg_cls(spec.version, ctx)
+            visit(pkg)
 
     return plan
 
@@ -294,15 +396,13 @@ def cmd_list(ctx: Context):
 
     package_names = sorted(PACKAGE_REGISTRY.keys())
 
-    width = shutil.get_terminal_size((80, 20)).columns
-
     longest_name = max(len(n) for n in package_names) if package_names else 1
 
     MIN_COL_WIDTH = 20
     padding = 4
     col_width = max(MIN_COL_WIDTH, longest_name + padding)
 
-    cols = max(1, width // col_width)
+    cols = max(1, ctx.term.columns // col_width)
     rows = math.ceil(len(package_names) / cols)
 
     grid = []
@@ -322,6 +422,7 @@ def cmd_info(ctx: Context):
     spec = parse_spec(ctx.args.package)
     pkg_cls = get_package(spec.name)
 
+    term = ctx.term
     INDENT = "    "
 
     try:
@@ -331,7 +432,7 @@ def cmd_info(ctx: Context):
 
     homepage = pkg_cls.homepage or "(none)"
 
-    description = pkg_cls.description().replace("\n", f"\n{INDENT}")
+    description = (pkg_cls.description() or "(none)").replace("\n", f"\n{INDENT}")
 
     versions = "\n".join(f"{INDENT}{v}" for v in pkg_cls.versions) if pkg_cls.versions else f"{INDENT}(none)"
 
@@ -342,33 +443,31 @@ def cmd_info(ctx: Context):
     )
 
     output = f"""\
-Package: {spec.name}
+{term.cyan}Package:{term.reset} {spec.name}
 
-Description:
+{term.cyan}Description:{term.reset}
     {description}
 
-Homepage: {homepage}
+{term.cyan}Homepage:{term.reset}
+    {homepage}
 
-Default Version:
+{term.cyan}Default Version:{term.reset}
     {default_version}
 
-Versions:
+{term.cyan}Versions:{term.reset}
 {versions}
 
-Dependencies:
+{term.cyan}Dependencies:{term.reset}
 {deps}
 """
 
     print(output)
 
 
-def setup_logging(args: argparse.Namespace):
-    verbose = getattr(args, "verbose", 0)
-    debug = getattr(args, "debug", False)
-
-    if debug or verbose >= 2:
+def setup_logging(ctx: Context):
+    if ctx.debug:
         level = logging.DEBUG
-    elif verbose >= 1:
+    elif ctx.verbose:
         level = logging.INFO
     else:
         level = logging.WARNING
@@ -383,16 +482,28 @@ def setup_logging(args: argparse.Namespace):
 
 def main():
     args = parse_args()
-    config = Config(args.config)
 
-    setup_logging(args)
+    ctx = Context(args)
 
-    ctx = Context(config, args)
+    setup_logging(ctx)
 
     ctx.log.debug("config file = %s", args.config)
 
-    args.handler(ctx)
+    try:
+        args.handler(ctx)
+
+    except Exception as e:
+        raise
+        # if ctx.debug:
+        #     raise
+        #
+        # ctx.log.error(f"{e}\nRun with --debug or -vv to see the full developer traceback.")
+        # sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nProgram interrupted by user.")
+        sys.exit(130)

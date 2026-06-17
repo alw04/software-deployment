@@ -20,19 +20,19 @@ class AutotoolsPackage(Package):
 
             include = prefix / "include"
             if include.is_dir():
-                self.append_env("CPPFLAGS", f"-I{include}")
+                self.prepend_env("CPPFLAGS", f"-I{include}")
 
             for libdir in ("lib", "lib64"):
                 lib_path = prefix / libdir
                 if lib_path.is_dir():
-                    self.append_env("LDFLAGS", f"-L{lib_path} -Wl,-rpath,{lib_path}")
+                    self.prepend_env("LDFLAGS", f"-L{lib_path} -Wl,-rpath,{lib_path}")
 
                 pkgconfig = lib_path / "pkgconfig"
                 if pkgconfig.is_dir():
-                    self.append_env("PKG_CONFIG_PATH", str(pkgconfig), sep=":")
+                    self.prepend_env("PKG_CONFIG_PATH", str(pkgconfig), sep=":")
 
         for lib_name in self.link_libs:
-            self.append_env("LDFLAGS", f"-l{lib_name}")
+            self.prepend_env("LDLIBS", f"-l{lib_name}")
 
     def configure_args(self) -> list[str]:
         return []

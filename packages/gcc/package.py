@@ -11,6 +11,7 @@ class Gcc(AutotoolsPackage):
 
     versions = [
         "15.2.0",
+        "12.2.0",
     ]
 
     depends_on = [

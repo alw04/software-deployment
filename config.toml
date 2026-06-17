@@ -1,8 +1,5 @@
 [paths]
 software_root = "/software/el9-dev"
-container_root = "/reference/containers"
+container_root = "/reference/containers-dev"
 
-apps_dir = "apps"
-downloads_dir = "downloads"
-builds_dir = "builds"
-modulefiles_dir = "modulefiles"
+[build]

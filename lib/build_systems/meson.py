@@ -26,16 +26,19 @@ class MesonPackage(Package):
 
             include = prefix / "include"
             if include.is_dir():
-                self.append_env("CFLAGS", f"-I{include}")
+                self.prepend_env("CFLAGS", f"-I{include}")
 
             for libdir in ("lib", "lib64"):
                 lib = prefix / libdir
                 if lib.is_dir():
-                    self.append_env("LDFLAGS", f"-L{lib} -Wl,-rpath,{lib}")
+                    self.prepend_env("LDFLAGS", f"-L{lib} -Wl,-rpath,{lib}")
 
                 pkgconfig = lib / "pkgconfig"
                 if pkgconfig.is_dir():
-                    self.append_env("PKG_CONFIG_PATH", str(pkgconfig), sep=":")
+                    self.prepend_env("PKG_CONFIG_PATH", str(pkgconfig), sep=":")
+
+        for lib_name in self.link_libs:
+            self.append_env("LDFLAGS", f"-l{lib_name}")
 
     def meson_args(self) -> list[str]:
         return []

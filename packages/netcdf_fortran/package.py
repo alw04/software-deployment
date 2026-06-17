@@ -17,10 +17,4 @@ class NetcdfFortran(AutotoolsPackage):
 
     depends_on = [
         Dependency("netcdfc"),
-        Dependency("hdf5"),
-    ]
-
-    link_libs = [
-        "netcdf",
-        "hdf5",
     ]

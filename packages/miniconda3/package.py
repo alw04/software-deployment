@@ -25,10 +25,6 @@ class Miniconda3(Package):
         "install",
     )
 
-    @property
-    def condarc_source(self):
-        return Path(__file__).with_name("condarc")
-
     def install(self):
         installer = self.download_file
 
@@ -36,10 +32,21 @@ class Miniconda3(Package):
 
         self.run_cmd([str(installer), "-b", "-p", str(self.prefix), "-u"])
 
-        conda = self.prefix / "bin" / "conda"
-
+        condarc_source = Path(__file__).with_name("condarc")
         condarc_dest = self.prefix / ".condarc"
 
-        self.atomic_write(condarc_dest, self.condarc_source.read_text())
+        self.atomic_write(condarc_dest, condarc_source.read_text())
 
-        self.run_cmd([str(conda), "install", "-y", "-n", "base", "-c", "conda-forge", "mamba", "conda-libmamba-solver"])
+        self.run_cmd(
+            [
+                str(self.prefix / "bin" / "conda"),
+                "install",
+                "-y",
+                "-n",
+                "base",
+                "-c",
+                "conda-forge",
+                "mamba",
+                "conda-libmamba-solver",
+            ]
+        )
