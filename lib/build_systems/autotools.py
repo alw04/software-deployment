@@ -43,8 +43,20 @@ class AutotoolsPackage(Package):
     def install_args(self) -> list[str]:
         return []
 
+    def bootstrap(self):
+        autogen = self.build_dir / "autogen.sh"
+
+        if autogen.exists():
+            self.run_cmd([str(autogen)], cwd=self.build_dir)
+        elif (self.build_dir / "configure.ac").exists():
+            self.run_cmd(["autoreconf", "-fi"], cwd=self.build_dir)
+
     def configure(self):
         configure = self.build_dir / "configure"
+
+        if not configure.exists():
+            self.bootstrap()
+
         self.run_cmd(
             [str(configure), f"--prefix={self.prefix}", *self.configure_args()],
             cwd=self.build_dir,

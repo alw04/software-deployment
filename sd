@@ -261,7 +261,7 @@ def cmd_modules_regenerate(ctx: Context):
             for version in pkg_cls.versions:
                 pkg = pkg_cls(version, ctx)
 
-                if not pkg.prefix.exists():
+                if not pkg.is_installed:
                     continue
 
                 add_target(pkg)
@@ -278,7 +278,7 @@ def cmd_modules_regenerate(ctx: Context):
                 for version in pkg_cls.versions:
                     pkg = pkg_cls(version, ctx)
 
-                    if not pkg.prefix.exists():
+                    if not pkg.is_installed:
                         continue
 
                     found = True
@@ -290,7 +290,7 @@ def cmd_modules_regenerate(ctx: Context):
             else:
                 pkg = pkg_cls(spec.version, ctx)
 
-                if not pkg.prefix.exists():
+                if not pkg.is_installed:
                     print(f"Skipping {pkg.name}@{pkg.version} (not installed)")
                     continue
 
@@ -376,6 +376,9 @@ def build_install_plan(ctx: Context) -> list[Package]:
 def cmd_install(ctx: Context):
     plan = build_install_plan(ctx)
 
+    installed = 0
+    skipped = 0
+
     if ctx.args.dry_run:
         print("Install plan:")
         for pkg in plan:
@@ -383,7 +386,17 @@ def cmd_install(ctx: Context):
         return
 
     for pkg in plan:
+        print(f"\n==> {pkg.name}@{pkg.version}")
+
+        if pkg.is_installed and not ctx.args.force:
+            print("Already installed, skipping (use -f/--force to reinstall)")
+            skipped += 1
+            continue
+
         pkg.run()
+        installed += 1
+
+    print(f"\nDone: {installed} installed" + (f", {skipped} skipped" if skipped else ""))
 
 
 def cmd_list(ctx: Context):
@@ -493,12 +506,11 @@ def main():
         args.handler(ctx)
 
     except Exception as e:
-        raise
-        # if ctx.debug:
-        #     raise
-        #
-        # ctx.log.error(f"{e}\nRun with --debug or -vv to see the full developer traceback.")
-        # sys.exit(1)
+        if ctx.debug:
+            raise
+
+        ctx.log.error(f"{e}\nRun with --debug or -vv to see the full developer traceback.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

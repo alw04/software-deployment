@@ -45,11 +45,16 @@ class ContainerPackage(Package):
             self.log.info("skipping pull, image already exists: %s", self.image_path)
             return
 
-        self.log.info("pulling container image: %s -> %s", image_ref, self.image_path)
-
         tmp_image = self.image_path.with_name(self.image_path.name + ".tmp")
 
+        if tmp_image.exists():
+            tmp_image.unlink()
+
+        self.log.info("pulling container image: %s -> %s", image_ref, self.image_path)
+
         cmd = ["apptainer", "pull"]
+        if self.ctx.args.force:
+            cmd.append("--force")
 
         cmd += [str(tmp_image), image_ref]
 
@@ -57,7 +62,10 @@ class ContainerPackage(Package):
             self.run_cmd(cmd)
             tmp_image.replace(self.image_path)
             self.log.info("container pull complete")
-        except Exception:
+
+        finally:
             if tmp_image.exists():
-                tmp_image.unlink()
-            raise
+                try:
+                    tmp_image.unlink()
+                except OSError:
+                    pass

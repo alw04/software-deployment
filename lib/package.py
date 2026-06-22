@@ -6,10 +6,11 @@ import re
 import shutil
 import subprocess
 import tarfile
-import urllib.request
 import zipfile
 from datetime import date
 from pathlib import Path
+
+import requests
 
 from lib.dependency import Dependency
 from lib.pkgloader import register_package
@@ -311,7 +312,10 @@ class Package:
             raise ValueError(f"{self.name}: no download URL defined for version {version!r}")
 
         if self.url:
-            return self.url.format(version=version)
+            try:
+                return self.url.format(version=version)
+            except (ValueError, KeyError) as e:
+                raise ValueError(f"{self.name}: invalid URL template {self.url!r}: {e}") from e
 
         raise NotImplementedError(
             f"{self.name}: no download URL source defined (set 'url', 'urls_by_version', or override url_for_version()"
@@ -325,33 +329,51 @@ class Package:
         "install",
     )
 
+    download_headers: dict[str, str] = {
+        # "User-Agent": (
+        #     "Mozilla/5.0 (X11; Linux x86_64) "
+        #     "AppleWebKit/537.36 (KHTML, like Gecko) "
+        #     "Chrome/137.0.0.0 Safari/537.36"
+        # )
+    }
+
     def download(self):
         url = self.url_for_version(self.version)
 
         filename = url.split("/")[-1]
         self.download_file = self.download_path / filename
-
         self.download_path.mkdir(parents=True, exist_ok=True)
 
         if self.download_file.is_file() and not self.ctx.args.force:
             self.log.info("skipping download, file already exists: %s", self.download_file)
             return
 
-        self.log.info("downloading file: %s -> %s", url, self.download_file)
-
         tmp = self.download_file.with_name(self.download_file.name + ".part")
 
         if tmp.exists():
             tmp.unlink()
 
+        self.log.info("downloading file: %s -> %s", url, self.download_file)
+
         try:
-            urllib.request.urlretrieve(url, tmp)
+            with requests.get(url, stream=True, headers=self.download_headers, timeout=60) as r:
+                r.raise_for_status()
+
+                chunk_size = 1024 * 1024
+
+                    for chunk in r.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            f.write(chunk)
+
             tmp.replace(self.download_file)
             self.log.info("download complete")
-        except Exception:
+
+        finally:
             if tmp.exists():
-                tmp.unlink()
-            raise
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
 
     def extract(self):
         if self.build_path.exists() and not self.ctx.args.force:
@@ -373,7 +395,40 @@ class Package:
         try:
             if zipfile.is_zipfile(self.download_file):
                 with zipfile.ZipFile(self.download_file) as zf:
-                    zf.extractall(tmp_dir)
+                    namelist = zf.namelist()
+
+                    paths = [Path(n) for n in namelist if n]
+                    top_dirs = {p.parts[0] for p in paths if len(p.parts) > 1}
+
+                    strip = len(top_dirs) == 1
+                    strip_dir = next(iter(top_dirs)) if strip else None
+
+                    for info in zf.infolist():
+                        if not info.filename:
+                            continue
+
+                        p = Path(info.filename)
+
+                        if strip and p.parts and p.parts[0] == strip_dir:
+                            p = Path(*p.parts[1:])
+
+                        if not p.parts or str(p) in (".", ""):
+                            continue
+
+                        if p.is_absolute():
+                            continue
+
+                        if ".." in p.parts:
+                            continue
+
+                        target = tmp_dir / p
+
+                        if info.is_dir():
+                            target.mkdir(parents=True, exist_ok=True)
+                        else:
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            with zf.open(info) as src, target.open("wb") as dst:
+                                shutil.copyfileobj(src, dst)
 
             elif tarfile.is_tarfile(self.download_file):
                 with tarfile.open(self.download_file, "r:*") as tf:
@@ -420,15 +475,19 @@ class Package:
                     tf.extractall(tmp_dir, members=valid_members, filter="data")
 
             else:
-                raise ValueError(f"{self.name}: unknown archive format: {self.download_file}")
+                raise RuntimeError(
+                    f"Unsupported archive format for {self.name}@{self.version}\n" f"File: {self.download_file}"
+                )
 
             tmp_dir.replace(self.build_path)
             self.log.info("extract complete")
 
-        except Exception:
+        finally:
             if tmp_dir.exists():
-                shutil.rmtree(tmp_dir)
-            raise
+                try:
+                    shutil.rmtree(tmp_dir)
+                except OSError:
+                    pass
 
     def configure(self):
         pass
@@ -438,6 +497,10 @@ class Package:
 
     def install(self):
         raise NotImplementedError(f"{self.name}: install() not implemented")
+
+    @property
+    def is_installed(self) -> bool:
+        return self.prefix.exists() and any(self.prefix.iterdir())
 
     module_path_map: dict[str, str] = {
         "bin": "PATH",
@@ -532,7 +595,6 @@ class Package:
         self.log.info("wrote modulefile to %s", self.modulefile)
 
     def run(self):
-        print(f"\n==> {self.name}@{self.version}")
         self.apply_build_path()
         self.apply_link_env()
 
