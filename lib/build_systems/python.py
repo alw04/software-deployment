@@ -14,14 +14,18 @@ class PythonPackage(Package):
         Dependency("python", type="build"),  # runtime uses the package's own venv
     ]
 
-    def extra_module_paths(self):
+    @property
+    def python_lib(self):
         site = sysconfig.get_path("purelib", vars={"base": str(self.prefix)})
+        return {
+            "PYTHONPATH": [Path(site)],
+        }
 
-        path = Path(site)
-        if path.exists():
-            return {"PYTHONPATH": [path]}
+    def additional_build_env(self):
+        return self.python_lib
 
-        return {}
+    def modulefile_prepend_path(self):
+        return self.python_lib
 
     @property
     def venv_python(self) -> Path:
@@ -45,3 +49,18 @@ class PythonPackage(Package):
                 # "--no-deps",
             ]
         )
+
+
+class PythonSourcePackage(PythonPackage):
+    abstract = True
+
+    phases = (
+        "download",
+        "extract",
+        "install",
+    )
+
+    def install(self):
+        self.create_venv()
+
+        self.run_cmd([str(self.venv_python), "-m", "pip", "install", "."], cwd=self.build_dir)

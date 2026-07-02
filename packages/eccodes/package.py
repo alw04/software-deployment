@@ -14,6 +14,6 @@ class Eccodes(CMakePackage):
     ]
 
     depends_on = [
-        Dependency("netcdfc"),
+        Dependency("netcdf-c"),
         Dependency("libaec"),
     ]

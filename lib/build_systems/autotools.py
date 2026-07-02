@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from lib.package import Package
 
 
@@ -14,9 +12,9 @@ class AutotoolsPackage(Package):
         "install",
     )
 
-    def apply_link_env(self):
+    def apply_toolchain_env(self):
         for dep in self.link_dependencies:
-            prefix = Path(dep.prefix)
+            prefix = dep.prefix
 
             include = prefix / "include"
             if include.is_dir():

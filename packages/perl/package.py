@@ -1,7 +1,7 @@
 from lib.build_systems.autotools import AutotoolsPackage
 
 
-class Perl(AutotoolsPackage):
+class Perl(AutotoolsPackage):  # Not Autotools, but follows a similar workflow
     """Perl 5 is a highly capable, feature-rich programming language with over
     27 years of development."""
 

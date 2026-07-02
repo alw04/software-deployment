@@ -1,0 +1,71 @@
+--- src/configure.ac.orig	2026-06-29 16:42:39.859353960 -0500
++++ src/configure.ac	2026-06-29 16:42:46.960495111 -0500
+@@ -92,7 +92,7 @@
+ 
+ # Set compiler flags.
+ AC_SUBST(AM_CXXFLAGS, "-Wall -Wextra $fail_on_warning -Wno-unknown-pragmas")
+-AC_SUBST(CXXFLAGS, "-std=c++98 -O3")
++AC_SUBST(CXXFLAGS, "-std=c++11 -O3")
+ AC_SUBST(CFLAGS, "-std=gnu99 -O3")
+ AC_SUBST(CPPFLAGS, "$CPPFLAGS $openmp_cppflags $sparsehash_include $bamtools_include")
+ AC_SUBST(LDFLAGS, "$openmp_cppflags $external_malloc_ldflags $bamtools_ldflags $LDFLAGS")
+
+--- src/Util/ClusterReader.cpp.orig	2026-06-29 16:43:53.745822609 -0500
++++ src/Util/ClusterReader.cpp	2026-06-29 16:45:29.215719534 -0500
+@@ -67,7 +67,7 @@
+ bool ClusterReader::readCluster(ClusterRecord& record)
+ {
+     std::string line;
+-    bool good = getline(*m_pReader, line);
++    bool good = static_cast<bool>(getline(*m_pReader, line));
+     if(!good || line.empty())
+         return false;
+     std::stringstream parser(line);
+
+--- src/SGA/rmdup.cpp.orig	2026-06-29 16:45:53.100194087 -0500
++++ src/SGA/rmdup.cpp	2026-06-29 16:46:15.084630895 -0500
+@@ -232,7 +232,7 @@
+     while(!done)
+     {
+         // Parse a line from the current file
+-        bool valid = getline(*reader_vec[currReaderIdx], line);
++        bool valid = static_cast<bool>(getline(*reader_vec[currReaderIdx], line));
+         ++numRead;
+         // Deal with switching the active reader and the end of files
+         if(!valid || numRead == buffer_size)
+
+--- src/Util/VariantIndex.cpp.orig	2026-06-29 17:31:17.494179014 -0500
++++ src/Util/VariantIndex.cpp	2026-06-29 17:31:44.873719589 -0500
+@@ -86,7 +86,7 @@
+         for(size_t vi = 0; vi < bucket.size(); ++vi)
+         {
+             const VariantRecord& record = m_records[bucket[vi]];
+-            if(abs(record.position - position) < distance)
++            if(std::abs(static_cast<long>(record.position) - position) < distance)
+                 out.push_back(record);
+         }
+     }
+
+--- src/Util/StdAlnTools.cpp.orig	2026-06-29 17:33:26.851732987 -0500
++++ src/Util/StdAlnTools.cpp	2026-06-29 17:33:51.296215610 -0500
+@@ -119,7 +119,7 @@
+     char code;
+     while(parser >> length)
+     {
+-        bool success = parser >> code;
++        bool success = static_cast<bool>(parser >> code);
+         expanded.append(length, code);
+         assert(success);
+         (void)success;
+
+--- src/Algorithm/GapFillProcess.cpp.orig	2026-06-29 17:34:47.694329111 -0500
++++ src/Algorithm/GapFillProcess.cpp	2026-06-29 17:35:11.371796587 -0500
+@@ -233,7 +233,7 @@
+ 
+     for(size_t i = 0; i < sequences.size(); ++i)
+     {
+-        int diff = abs(sequences[i].size() - estimatedSize);
++        int diff = std::abs(static_cast<long>(sequences[i].size()) - estimatedSize);
+         //printf("ES: %d S: %zu D: %d\n", estimatedSize, sequences[i].size(), diff);
+ 
+         if(diff < selectedSizeDiff)

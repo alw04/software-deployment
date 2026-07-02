@@ -1,8 +1,7 @@
-from lib.dependency import Dependency
-from lib.package import Package
+from lib.build_systems.go import GoPackage
 
 
-class Gocryptfs(Package):
+class Gocryptfs(GoPackage):
     """Encrypted overlay filesystem written in Go"""
 
     homepage = "https://nuetzlich.net/gocryptfs/"
@@ -11,13 +10,3 @@ class Gocryptfs(Package):
     versions = [
         "2.5.1",
     ]
-
-    depends_on = [
-        Dependency("go", type="build"),
-    ]
-
-    def build(self):
-        self.run_cmd([str(self.build_dir / "build-without-openssl.bash")], cwd=self.build_dir)
-
-    def install(self):
-        self.install_binary(self.build_dir / "gocryptfs")

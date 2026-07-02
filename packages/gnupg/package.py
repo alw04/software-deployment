@@ -13,7 +13,7 @@ class Gnupg(AutotoolsPackage):
     ]
 
     depends_on = [
-        Dependency("libgpgerror", type=("build", "link")),
+        Dependency("libgpg-error", type=("build", "link")),
         Dependency("libgcrypt", type=("build", "link")),
         Dependency("libassuan", type=("build", "link")),
         Dependency("libksba", type=("build", "link")),

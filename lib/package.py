@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import inspect
 import os
 import re
@@ -13,6 +11,7 @@ from pathlib import Path
 import requests
 
 from lib.dependency import Dependency
+from lib.exceptions import UndeclaredDependencyError
 from lib.pkgloader import register_package
 
 
@@ -39,7 +38,7 @@ class Package:
 
     @property
     def name(self) -> str:
-        return self.__class__.__name__.lower()
+        return self.__class__.__module__.rsplit(".", 1)[-1].lower()
 
     @classmethod
     def description(cls) -> str | None:
@@ -96,19 +95,22 @@ class Package:
         return deps
 
     @property
-    def build_dependencies(self) -> list[Package]:
+    def build_dependencies(self) -> list["Package"]:
         return [self.dependencies[dep.name] for dep in self.dependencies_spec() if "build" in dep.types]
 
     @property
-    def link_dependencies(self) -> list[Package]:
+    def link_dependencies(self) -> list["Package"]:
         return [self.dependencies[dep.name] for dep in self.dependencies_spec() if "link" in dep.types]
 
     @property
-    def run_dependencies(self) -> list[Package]:
+    def run_dependencies(self) -> list["Package"]:
         return [self.dependencies[dep.name] for dep in self.dependencies_spec() if "run" in dep.types]
 
-    def dep(self, name: str) -> Package:
-        return self.dependencies[name]
+    def dep(self, name: str) -> "Package":
+        try:
+            return self.dependencies[name]
+        except KeyError:
+            raise UndeclaredDependencyError(self.name, name) from None
 
     conflicts: list[str] = []
 
@@ -163,18 +165,42 @@ class Package:
         existing = self.env.get(key)
         self.env[key] = f"{value}{sep}{existing}" if existing else value
 
-    def apply_build_path(self):
+    def additonal_build_env(self) -> dict[str, list[Path]]:
+        return {}
+
+    def apply_build_env_from_deps(self):
         for dep in self.build_dependencies:
-            bin_dir = Path(dep.prefix) / "bin"
+            bin_dir = dep.prefix / "bin"
             if bin_dir.is_dir():
                 self.prepend_env("PATH", str(bin_dir), sep=":")
 
+            for base in reversed(dep.__class__.__mro__):
+                if "additional_build_env" not in base.__dict__:
+                    continue
+
+                additional = base.additional_build_env(dep)
+
+                for var, paths in additional.items():
+                    for path in paths:
+                        if not path.exists():
+                            self.log.warning(f"skipping missing env path: {var} -> {path}")
+                            continue
+
+                        self.prepend_env(var, str(path), sep=":")
+
     link_libs: list[str] = []
 
-    def apply_link_env(self):
+    def apply_toolchain_env(self):
         pass
 
-    def run_cmd(self, args: list[str], *, cwd: str | Path | None = None, env: dict[str, str] | None = None):
+    def run_cmd(
+        self,
+        args: list[str],
+        *,
+        cwd: str | Path | None = None,
+        env: dict[str, str] | None = None,
+        input: str | None = None,
+    ):
         cmd_env = self.env | (env or {})
 
         term = self.ctx.term
@@ -199,6 +225,8 @@ class Package:
                 cwd=cwd,
                 env=cmd_env,
                 check=True,
+                text=True,
+                input=input,
             )
         else:
             try:
@@ -207,8 +235,9 @@ class Package:
                     cwd=cwd,
                     env=cmd_env,
                     capture_output=True,
-                    text=True,
                     check=True,
+                    text=True,
+                    input=input,
                 )
             except subprocess.CalledProcessError as e:
 
@@ -259,9 +288,7 @@ class Package:
         dst.parent.mkdir(parents=True, exist_ok=True)
 
         tmp = dst.with_name(dst.name + ".tmp")
-
-        if tmp.exists():
-            tmp.unlink()
+        tmp.unlink(missing_ok=True)
 
         shutil.copyfile(src, tmp)
 
@@ -278,26 +305,22 @@ class Package:
         link.parent.mkdir(parents=True, exist_ok=True)
 
         tmp = link.with_name(link.name + ".tmp")
-
-        if tmp.exists() or tmp.is_symlink():
-            tmp.unlink()
-
+        tmp.unlink(missing_ok=True)
         tmp.symlink_to(target)
-
         tmp.replace(link)
 
     def install_directory(self, src: Path, dst: Path):
         tmp = dst.with_name(dst.name + ".tmp")
 
-        if tmp.exists():
-            shutil.rmtree(tmp)
+        try:
+            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(dst, ignore_errors=True)
 
-        shutil.copytree(src, tmp)
+            shutil.copytree(src, tmp)
+            tmp.replace(dst)
 
-        if dst.exists():
-            shutil.rmtree(dst)
-
-        tmp.replace(dst)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def atomic_write(self, path: Path, content: str):
         tmp = path.with_name(path.name + ".tmp")
@@ -350,8 +373,7 @@ class Package:
 
         tmp = self.download_file.with_name(self.download_file.name + ".part")
 
-        if tmp.exists():
-            tmp.unlink()
+        tmp.unlink(missing_ok=True)
 
         self.log.info("downloading file: %s -> %s", url, self.download_file)
 
@@ -361,6 +383,7 @@ class Package:
 
                 chunk_size = 1024 * 1024
 
+                with open(tmp, "wb") as f:
                     for chunk in r.iter_content(chunk_size=chunk_size):
                         if chunk:
                             f.write(chunk)
@@ -369,25 +392,15 @@ class Package:
             self.log.info("download complete")
 
         finally:
-            if tmp.exists():
-                try:
-                    tmp.unlink()
-                except OSError:
-                    pass
+            tmp.unlink(missing_ok=True)
 
     def extract(self):
         if self.build_path.exists() and not self.ctx.args.force:
             self.log.info("skipping extract, build directory already exists: %s", self.build_path)
             return
 
-        tmp_dir = self.build_path.with_suffix(".tmp")
-
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
-
-        if self.build_path.exists():
-            shutil.rmtree(self.build_path)
-
+        tmp_dir = self.build_path.with_name(self.build_path.name + ".tmp")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
         self.log.info("extracting archive: %s -> %s", self.download_file, self.build_path)
@@ -479,15 +492,12 @@ class Package:
                     f"Unsupported archive format for {self.name}@{self.version}\n" f"File: {self.download_file}"
                 )
 
+            shutil.rmtree(self.build_path, ignore_errors=True)
             tmp_dir.replace(self.build_path)
             self.log.info("extract complete")
 
         finally:
-            if tmp_dir.exists():
-                try:
-                    shutil.rmtree(tmp_dir)
-                except OSError:
-                    pass
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def configure(self):
         pass
@@ -515,35 +525,35 @@ class Package:
         "share/pkgconfig": "PKG_CONFIG_PATH",
     }
 
-    def extra_module_paths(self) -> dict[str, list[Path]]:
+    def modulefile_prepend_path(self) -> dict[str, list[Path]]:
         return {}
 
     @property
     def module_paths(self) -> list[tuple[str, Path]]:
-        paths = []
+        module_paths = []
 
         for relpath, var in self.module_path_map.items():
-            path = self.prefix / relpath
-            if path.exists():
-                paths.append((var, path))
+            full_path = self.prefix / relpath
+            if full_path.exists():
+                module_paths.append((var, full_path))
 
         for base in reversed(self.__class__.__mro__):
-            if "extra_module_paths" not in base.__dict__:
+            if "modulefile_prepend_path" not in base.__dict__:
                 continue
 
-            extra = base.extra_module_paths(self)
+            prepend_paths = base.modulefile_prepend_path(self)
 
-            for var, path_list in extra.items():
+            for var, path_list in prepend_paths.items():
                 for path in path_list:
                     if not path.exists():
                         self.log.warning(f"skipping missing module path: {var} -> {path}")
                         continue
 
-                    paths.append((var, path))
+                    module_paths.append((var, path))
 
-        return paths
+        return module_paths
 
-    def module_env(self) -> dict[str, str]:
+    def modulefile_setenv(self) -> dict[str, str]:
         return {}
 
     shell_functions: dict[str, str] = {}
@@ -582,7 +592,7 @@ class Package:
             "dependencies": [dep.name for dep in self.run_dependencies],
             "conflicts": self.conflicts_spec(),
             "paths": self.module_paths,
-            "env": self.module_env(),
+            "env": self.modulefile_setenv(),
             "shell_functions": self.render_shell_functions(),
             "generated_date": date.today().isoformat(),
         }
@@ -595,8 +605,8 @@ class Package:
         self.log.info("wrote modulefile to %s", self.modulefile)
 
     def run(self):
-        self.apply_build_path()
-        self.apply_link_env()
+        self.apply_build_env_from_deps()
+        self.apply_toolchain_env()
 
         for phase in self.phases:
             print(phase)

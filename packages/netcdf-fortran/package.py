@@ -16,5 +16,5 @@ class NetcdfFortran(AutotoolsPackage):
     ]
 
     depends_on = [
-        Dependency("netcdfc"),
+        Dependency("netcdf-c"),
     ]

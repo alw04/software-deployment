@@ -1,0 +1,14 @@
+--- Makefile.orig	2026-07-01 14:55:45.790128901 -0500
++++ Makefile	2026-07-01 14:55:53.734285256 -0500
+@@ -40,9 +40,9 @@
+ 	$(CC) $(CFLAGS) -c $< -o $*.o $(CCINCLUDES)
+ 
+ install: all
+-	@mkdir $(INSTDIR)
++	@mkdir -p $(INSTDIR)
+ 	cp RepeatScout $(INSTDIR)
+-	cp README $(INSTDIR)
++	cp README.md $(INSTDIR)
+ 	cp build_lmer_table $(INSTDIR)
+ 	cp filter-stage-1.prl $(INSTDIR)
+ 	cp filter-stage-2.prl $(INSTDIR)

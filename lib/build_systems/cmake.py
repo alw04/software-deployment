@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from lib.dependency import Dependency
 from lib.package import Package
 
@@ -19,9 +17,9 @@ class CMakePackage(Package):
         Dependency("cmake", type="build"),
     ]
 
-    def apply_link_env(self):
+    def apply_toolchain_env(self):
         for dep in self.link_dependencies:
-            prefix = Path(dep.prefix)
+            prefix = dep.prefix
 
             self.prepend_env("CMAKE_PREFIX_PATH", str(prefix), sep=":")
 
@@ -43,7 +41,7 @@ class CMakePackage(Package):
         for lib_name in self.link_libs:
             self.append_env("LDFLAGS", f"-l{lib_name}")
 
-    def extra_module_paths(self):
+    def modulefile_prepend_path(self):
         return {
             "CMAKE_PREFIX_PATH": [self.prefix],
         }

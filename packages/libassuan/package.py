@@ -13,5 +13,5 @@ class Libassuan(AutotoolsPackage):
     ]
 
     depends_on = [
-        Dependency("libgpgerror", type="build"),
+        Dependency("libgpg-error", type="build"),
     ]

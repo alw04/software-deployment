@@ -1,0 +1,9 @@
+--- src/Makefile.orig	2026-06-29 18:03:52.343994075 -0500
++++ src/Makefile	2026-06-29 18:03:56.710080885 -0500
+@@ -1,5 +1,5 @@
+ CC=             gcc
+-CFLAGS=         -O3 -fomit-frame-pointer -static
++CFLAGS=         -O3 -fomit-frame-pointer
+ #CFLAGS=         -O3 -g -D_DEBUG
+ DFLAGS= 
+ 

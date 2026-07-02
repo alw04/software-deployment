@@ -87,6 +87,7 @@ class Context:
 
         self.term = TermInfo()
         self.config = Config(args.config)
+        self.cache_dir = args.cache_dir
         self.log = logging.getLogger("sd")
 
         root_dir = Path(__file__).resolve().parent
@@ -123,20 +124,11 @@ def parse_args() -> argparse.Namespace:
                 # Install specific versions
                 %(prog)s install gcc@15.2.0 cmake@3.30.9
 
-                # Install a full group
-                %(prog)s install --group common
-
-                # Install multiple groups
-                %(prog)s install --group common --group sequence_tools
-
                 # Preview installation without executing
-                %(prog)s install --group common --dry-run
+                %(prog)s install repeatmodeler --dry-run
 
                 # List available packages
                 %(prog)s list
-
-                # Filter list by group
-                %(prog)s list --group common
 
                 # Inspect package metadata and dependencies
                 %(prog)s info python
@@ -162,6 +154,14 @@ def parse_args() -> argparse.Namespace:
         help="Path to config file",
     )
 
+    parser.add_argument(
+        "--cache-dir",
+        default=Path.home() / ".cache" / "sd",
+        type=Path,
+        metavar="PATH",
+        help="Path to cache directory",
+    )
+
     subparser = parser.add_subparsers(dest="command", required=True)
 
     install_parser = subparser.add_parser(
@@ -172,13 +172,6 @@ def parse_args() -> argparse.Namespace:
         nargs="*",
         metavar="package[@version]",
         help="Package(s) to install (e.g. python gcc@15.2.0)",
-    )
-    install_parser.add_argument(
-        "-g",
-        "--group",
-        action="append",
-        metavar="GROUP",
-        help="Install a predefined group of packages (e.g. common, sequence_tools)",
     )
     install_parser.add_argument("-f", "--force", action="store_true", help="Force rebuild even if already installed")
     install_parser.add_argument("--dry-run", action="store_true", help="Show the install process without executing")
@@ -192,9 +185,6 @@ def parse_args() -> argparse.Namespace:
         "list",
         help="List available packages in the registry",
         description="List available packages in the registry",
-    )
-    list_parser.add_argument(
-        "--group", action="append", metavar="GROUP", help="Filter packages by group (e.g. common, sequence_tools)"
     )
     list_parser.set_defaults(handler=cmd_list)
 
@@ -230,8 +220,8 @@ def parse_args() -> argparse.Namespace:
 
     args = parser.parse_args()
 
-    if args.command == "install" and not (args.packages or args.group):
-        parser.error("install requires at least one package or -g/--group")
+    if args.command == "install" and not args.packages:
+        parser.error("install requires at least one package")
 
     if args.command == "modules" and args.modules_command == "regenerate":
         if not (args.packages or args.all):
@@ -241,8 +231,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def cmd_modules_regenerate(ctx: Context):
-    if not PACKAGE_REGISTRY:
-        load_all_packages()
+    load_all_packages()
 
     targets = []
     seen = set()
@@ -400,8 +389,7 @@ def cmd_install(ctx: Context):
 
 
 def cmd_list(ctx: Context):
-    if not PACKAGE_REGISTRY:
-        load_all_packages()
+    load_all_packages()
 
     if not PACKAGE_REGISTRY:
         print("No packages found in the registry.")

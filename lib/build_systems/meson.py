@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from lib.dependency import Dependency
 from lib.package import Package
 
@@ -20,9 +18,9 @@ class MesonPackage(Package):
         Dependency("ninja", type="build"),
     ]
 
-    def apply_link_env(self):
+    def apply_toolchain_env(self):
         for dep in self.link_dependencies:
-            prefix = Path(dep.prefix)
+            prefix = dep.prefix
 
             include = prefix / "include"
             if include.is_dir():

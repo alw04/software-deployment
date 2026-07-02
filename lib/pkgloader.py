@@ -1,26 +1,27 @@
 import importlib.util
+import sys
 from pathlib import Path
 
+from lib.exceptions import PackageNotFoundError
+
 PACKAGE_REGISTRY = {}
-
-
-class PackageNotFoundError(Exception):
-    def __init__(self, name, required_by=None):
-        msg = f"Package '{name}' not found"
-        if required_by:
-            msg += f" (required by '{required_by}')"
-        super().__init__(msg)
+_loaded = False
 
 
 def register_package(cls):
-    PACKAGE_REGISTRY[cls.__name__.lower()] = cls
+    pkg_key = cls.__module__.rsplit(".", 1)[-1].lower()
+    PACKAGE_REGISTRY[pkg_key] = cls
     return cls
 
 
 def load_all_packages():
+    global _loaded
+    if _loaded:
+        return
+
     packages_dir = Path(__file__).resolve().parents[1] / "packages"
 
-    for pkg_dir in packages_dir.iterdir():
+    for pkg_dir in sorted(packages_dir.iterdir()):
         if not pkg_dir.is_dir():
             continue
 
@@ -34,12 +35,18 @@ def load_all_packages():
             raise ImportError(f"Cannot load package: {pkg_dir.name}")
 
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        sys.modules[spec.name] = module
+
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            raise ImportError(f"Failed to load package {pkg_dir.name!r}: {e}") from e
+
+    _loaded = True
 
 
 def get_package(name: str, *, required_by: str | None = None):
-    if not PACKAGE_REGISTRY:
-        load_all_packages()
+    load_all_packages()
 
     pkg_key = name.lower()
     if pkg_key not in PACKAGE_REGISTRY:

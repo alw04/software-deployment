@@ -12,6 +12,26 @@ class MakefilePackage(Package):
         "install",
     )
 
+    def apply_toolchain_env(self):
+        for dep in self.link_dependencies:
+            prefix = dep.prefix
+
+            include = prefix / "include"
+            if include.is_dir():
+                self.prepend_env("CPPFLAGS", f"-I{include}")
+
+            for libdir in ("lib", "lib64"):
+                lib_path = prefix / libdir
+                if lib_path.is_dir():
+                    self.prepend_env("LDFLAGS", f"-L{lib_path} -Wl,-rpath,{lib_path}")
+
+                pkgconfig = lib_path / "pkgconfig"
+                if pkgconfig.is_dir():
+                    self.prepend_env("PKG_CONFIG_PATH", str(pkgconfig), sep=":")
+
+        for lib_name in self.link_libs:
+            self.prepend_env("LDLIBS", f"-l{lib_name}")
+
     def make_args(self) -> list[str]:
         return []
 

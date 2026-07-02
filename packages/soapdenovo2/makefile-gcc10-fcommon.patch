@@ -1,0 +1,43 @@
+--- Makefile.orig	2026-06-29 17:57:01.073811845 -0500
++++ Makefile	2026-06-29 17:57:13.016049521 -0500
+@@ -1,9 +1,9 @@
+ MAKEFLAGS += --no-print-directory
+ CC = g++
+ ifdef debug
+-CFLAGS=         -O0 -g -fomit-frame-pointer -DDEBUG
++CFLAGS=         -O0 -g -fomit-frame-pointer -DDEBUG -fcommon
+ else
+-CFLAGS=         -O3 -fomit-frame-pointer
++CFLAGS=         -O3 -fomit-frame-pointer -fcommon
+ endif
+ 
+ SUBDIRS = sparsePregraph standardPregraph fusion
+
+--- sparsePregraph/Makefile.orig	2026-06-29 18:00:53.475437110 -0500
++++ sparsePregraph/Makefile	2026-06-29 18:02:00.418768674 -0500
+@@ -1,8 +1,8 @@
+ CC=            g++
+ ifdef debug
+-CFLAGS=         -O0 -g -fomit-frame-pointer -DDEBUG
++CFLAGS=         -O0 -g -fomit-frame-pointer -DDEBUG -fcommon
+ else
+-CFLAGS=         -O3 -fomit-frame-pointer -w
++CFLAGS=         -O3 -fomit-frame-pointer -w -fcommon
+ endif
+ 
+ DFLAGS=         
+
+--- standardPregraph/Makefile.orig	2026-06-29 18:01:20.432973619 -0500
++++ standardPregraph/Makefile	2026-06-29 18:02:20.692171771 -0500
+@@ -9,9 +9,9 @@
+ GCCVERSIONMAJOR := $(shell expr `$(CC) -dumpversion | cut -f1 -d.` \>= 4)
+ GCCVERSIONMINOR := $(shell expr `$(CC) -dumpversion | cut -f2 -d.` \>= 4)
+ ifdef debug
+-CFLAGS=         -O0 -g -fomit-frame-pointer -DDEBUG#-msse4.2
++CFLAGS=         -O0 -g -fomit-frame-pointer -DDEBUG -fcommon #-msse4.2
+ else
+-CFLAGS=         -O3 -fomit-frame-pointer -w #-msse4.2
++CFLAGS=         -O3 -fomit-frame-pointer -w -fcommon #-msse4.2
+ endif
+ DFLAGS=         
+ OBJS=		arc.o attachPEinfo.o bubble.o check.o compactEdge.o \
