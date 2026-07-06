@@ -14,7 +14,7 @@ class RPackage(Package):
 
     @property
     def cran_cache_dir(self) -> Path:
-        return self.ctx.cache_dir / "cran"
+        return self.ctx.xdg.cache_dir / "cran"
 
     @property
     def cran_packages_file(self) -> Path:
@@ -36,11 +36,14 @@ class RPackage(Package):
         r.raise_for_status()
 
         if r.status_code == 304:
+            self.log.debug("CRAN index unchanged (using cached version): %s", self.cran_packages_file)
             return
 
+        self.log.debug("updating CRAN index cache: %s", self.cran_packages_file)
         self.cran_packages_file.write_text(r.text)
 
         if etag := r.headers.get("ETag"):
+            self.log.debug("updated CRAN index ETag: %s", etag)
             self.cran_packages_etag_file.write_text(etag)
 
     def _latest_cran_version(self) -> str:

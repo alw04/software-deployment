@@ -1,117 +1,53 @@
 #!/usr/bin/env python3
 
+import sys
+
+if sys.version_info < (3, 11):
+    sys.exit("Error: Python 3.11 or newer is required.")
+
 import argparse
 import logging
 import math
-import os
 import shutil
-import sys
 import textwrap
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
-
 from lib.config import Config
+from lib.context import Context
+from lib.log import setup_logging
 from lib.package import Package
 from lib.pkgloader import PACKAGE_REGISTRY, get_package, load_all_packages
 from lib.spec import parse_spec
+from lib.term import TermInfo
+from lib.xdg import get_xdg_dirs
 
+APP_NAME = Path(__file__).stem
 
-class TermInfo:
-    BLACK = 30
-    RED = 31
-    GREEN = 32
-    YELLOW = 33
-    BLUE = 34
-    MAGENTA = 35
-    CYAN = 36
-    WHITE = 37
-
-    def __init__(self):
-        self.supports_color = self.check_color_support()
-
-        self.reset = "\033[0m" if self.supports_color else ""
-        self.bold = "\033[1m" if self.supports_color else ""
-        self.dim = "\033[2m" if self.supports_color else ""
-
-        self.black = self.fg(self.BLACK)
-        self.red = self.fg(self.RED)
-        self.green = self.fg(self.GREEN)
-        self.yellow = self.fg(self.YELLOW)
-        self.blue = self.fg(self.BLUE)
-        self.magenta = self.fg(self.MAGENTA)
-        self.cyan = self.fg(self.CYAN)
-        self.white = self.fg(self.WHITE)
-
-        self.bg_black = self.bg(self.BLACK)
-        self.bg_red = self.bg(self.RED)
-        self.bg_green = self.bg(self.GREEN)
-        self.bg_yellow = self.bg(self.YELLOW)
-        self.bg_blue = self.bg(self.BLUE)
-        self.bg_magenta = self.bg(self.MAGENTA)
-        self.bg_cyan = self.bg(self.CYAN)
-        self.bg_white = self.bg(self.WHITE)
-
-    def fg(self, code: int) -> str:
-        return f"\033[{code}m" if self.supports_color else ""
-
-    def bg(self, code: int) -> str:
-        return f"\033[{code + 10}m" if self.supports_color else ""
-
-    def check_color_support(self) -> bool:
-        if "NO_COLOR" in os.environ:
-            return False
-        if "FORCE_COLOR" in os.environ:
-            return True
-        if not (hasattr(sys.stdout, "isatty") and sys.stdout.isatty()):
-            return False
-        if os.environ.get("COLORTERM") in ("truecolor", "24bit"):
-            return True
-
-        term = os.environ.get("TERM", "").lower()
-        color_terms = ("color", "ansi", "xterm", "screen", "tmux", "linux")
-        return any(keyword in term for keyword in color_terms)
-
-    @property
-    def columns(self) -> int:
-        return shutil.get_terminal_size(fallback=(80, 24)).columns
-
-    @property
-    def rows(self) -> int:
-        return shutil.get_terminal_size(fallback=(80, 24)).lines
-
-
-class Context:
-    def __init__(self, args: argparse.Namespace):
-        self.args = args
-
-        self.term = TermInfo()
-        self.config = Config(args.config)
-        self.cache_dir = args.cache_dir
-        self.log = logging.getLogger("sd")
-
-        root_dir = Path(__file__).resolve().parent
-        self.jinja_env = Environment(
-            loader=FileSystemLoader(
-                [
-                    root_dir / "lib" / "templates",
-                    root_dir / "packages",
-                ]
-            ),
-            trim_blocks=True,
-            lstrip_blocks=True,
-        )
-
-    @property
-    def verbose(self) -> bool:
-        return getattr(self.args, "verbose", 0) >= 1
-
-    @property
-    def debug(self) -> bool:
-        return getattr(self.args, "debug", False) or getattr(self.args, "verbose", 0) >= 2
+log = logging.getLogger(APP_NAME)
 
 
 def parse_args() -> argparse.Namespace:
+    global_opts = argparse.ArgumentParser(add_help=False)
+    global_opts.add_argument(
+        "--config",
+        default=Path(__file__).with_name("config.toml"),
+        type=Path,
+        metavar="PATH",
+        help="Path to config file",
+    )
+    global_opts.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase output verbosity (-v for verbose, -vv for debug)",
+    )
+    global_opts.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug output (equivalent to -vv)",
+    )
+
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Build and install software packages and containers",
@@ -126,6 +62,12 @@ def parse_args() -> argparse.Namespace:
 
                 # Preview installation without executing
                 %(prog)s install repeatmodeler --dry-run
+
+                # Uninstall a package
+                %(prog)s uninstall r-ggplot2
+
+                # Uninstall and purge downloads/builds
+                %(prog)s uninstall r-ggplot2 --purge
 
                 # List available packages
                 %(prog)s list
@@ -144,47 +86,77 @@ def parse_args() -> argparse.Namespace:
                 %(prog)s modules regenerate --all --dry-run
             """
         ),
+        # parents=[global_opts],
     )
 
-    parser.add_argument(
-        "--config",
-        default=Path(__file__).with_name("config.toml"),
-        type=Path,
-        metavar="PATH",
-        help="Path to config file",
-    )
-
-    parser.add_argument(
-        "--cache-dir",
-        default=Path.home() / ".cache" / "sd",
-        type=Path,
-        metavar="PATH",
-        help="Path to cache directory",
-    )
-
-    subparser = parser.add_subparsers(dest="command", required=True)
+    subparser = parser.add_subparsers(dest="command")
 
     install_parser = subparser.add_parser(
-        "install", help="Install one or more packages", description="Install packages and their dependencies"
+        "install",
+        help="Install one or more packages",
+        description="Install packages and their dependencies",
+        parents=[global_opts],
     )
     install_parser.add_argument(
         "packages",
-        nargs="*",
+        nargs="+",
         metavar="package[@version]",
         help="Package(s) to install (e.g. python gcc@15.2.0)",
     )
-    install_parser.add_argument("-f", "--force", action="store_true", help="Force rebuild even if already installed")
-    install_parser.add_argument("--dry-run", action="store_true", help="Show the install process without executing")
     install_parser.add_argument(
-        "-v", "--verbose", action="count", default=0, help="Increase output verbosity (-v for verbose, -vv for debug)"
+        "-f",
+        "--force",
+        action="count",
+        default=0,
+        help="Force rebuild of requested packages (-ff also forces dependencies)",
     )
-    install_parser.add_argument("--debug", action="store_true", help="Enable debug output (same as -vv)")
+    install_parser.add_argument(
+        "--force-deps",
+        action="store_true",
+        help="Force rebuild of dependencies too (equivalent to -ff)",
+    )
+    install_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the install process without executing",
+    )
     install_parser.set_defaults(handler=cmd_install)
+
+    uninstall_parser = subparser.add_parser(
+        "uninstall",
+        help="Uninstall one or more packages",
+        description="Remove an installed package's install prefix and modulefile",
+        parents=[global_opts],
+    )
+    uninstall_parser.add_argument(
+        "packages",
+        nargs="+",
+        metavar="package[@version]",
+        help="Package(s) to uninstall (e.g. r-ggplot2@4.0.3",
+    )
+    uninstall_parser.add_argument(
+        "--purge",
+        action="store_true",
+        help="Also removed cached downloads and build directories for this version",
+    )
+    uninstall_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Don't prompt for confirmation",
+    )
+    uninstall_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be removed without deleting anything",
+    )
+    uninstall_parser.set_defaults(handler=cmd_uninstall)
 
     list_parser = subparser.add_parser(
         "list",
         help="List available packages in the registry",
         description="List available packages in the registry",
+        parents=[global_opts],
     )
     list_parser.set_defaults(handler=cmd_list)
 
@@ -192,11 +164,20 @@ def parse_args() -> argparse.Namespace:
         "info",
         help="Show package details",
         description="Display metadata about a package including versions, description, and homepage",
+        parents=[global_opts],
     )
-    info_parser.add_argument("package", metavar="package[@version]", help="Package to inspect (e.g. r or r@4.5.1)")
+    info_parser.add_argument(
+        "package",
+        metavar="package[@version]",
+        help="Package to inspect (e.g. r or r@4.5.1)",
+    )
     info_parser.set_defaults(handler=cmd_info)
 
-    modules_parser = subparser.add_parser("modules", help="Manage modulefiles", description="Manage modulefiles")
+    modules_parser = subparser.add_parser(
+        "modules",
+        help="Manage modulefiles",
+        description="Manage modulefiles",
+    )
 
     modules_subparser = modules_parser.add_subparsers(dest="modules_command", required=True)
 
@@ -204,12 +185,18 @@ def parse_args() -> argparse.Namespace:
         "regenerate",
         help="Regenerate modulefiles for selected packages",
         description="Regenerate modulefiles for selected packages",
+        parents=[global_opts],
     )
     modules_regenerate.add_argument(
-        "packages", nargs="*", metavar="package[@version]", help="Package(s) to regenerate modulefiles for"
+        "packages",
+        nargs="*",
+        metavar="package[@version]",
+        help="Package(s) to regenerate modulefiles for",
     )
     modules_regenerate.add_argument(
-        "--all", action="store_true", help="Regenerate modulefiles for all installed packages"
+        "--all",
+        action="store_true",
+        help="Regenerate modulefiles for all installed packages",
     )
     modules_regenerate.add_argument(
         "--dry-run",
@@ -220,12 +207,16 @@ def parse_args() -> argparse.Namespace:
 
     args = parser.parse_args()
 
-    if args.command == "install" and not args.packages:
-        parser.error("install requires at least one package")
+    if not args.command:
+        parser.print_help()
+        print("\nError: a command is required. See usage above.")
+        sys.exit(1)
 
     if args.command == "modules" and args.modules_command == "regenerate":
         if not (args.packages or args.all):
             parser.error("modules regenerate requires at least one package or --all")
+
+    args.debug = args.debug or args.verbose >= 2
 
     return args
 
@@ -274,19 +265,19 @@ def cmd_modules_regenerate(ctx: Context):
                     add_target(pkg)
 
                 if not found:
-                    print(f"No installed versions of {spec.name} found")
+                    log.warning(f"No installed versions of {spec.name} found")
 
             else:
                 pkg = pkg_cls(spec.version, ctx)
 
                 if not pkg.is_installed:
-                    print(f"Skipping {pkg.name}@{pkg.version} (not installed)")
+                    log.warning(f"Skipping {pkg.name}@{pkg.version} (not installed)")
                     continue
 
                 add_target(pkg)
 
     if not targets:
-        print("No installed packages found to regenerate")
+        log.warning("No installed packages found to regenerate")
         return
 
     for pkg in targets:
@@ -305,15 +296,17 @@ def cmd_modules_regenerate(ctx: Context):
 
     if ctx.args.dry_run:
         print(f"\nWould regenerate the {len(targets)} modulefile(s) shown above")
-    else:
-        print(f"\nRegenerated {len(targets)} modulefile(s)")
+        return
+
+    print(f"\nRegenerated {len(targets)} modulefile(s)")
 
 
-def build_install_plan(ctx: Context) -> list[Package]:
+def build_install_plan(ctx: Context) -> tuple[list[Package], set[tuple[str, str]]]:
     plan = []
     seen = set()
     visiting = set()
     stack = []
+    requested_pkgs = set()
 
     def visit(pkg: Package):
         key = (pkg.name, pkg.version)
@@ -348,56 +341,163 @@ def build_install_plan(ctx: Context) -> list[Package]:
 
     for package in ctx.args.packages:
         spec = parse_spec(package)
-
         pkg_cls = get_package(spec.name)
 
         if spec.all_versions:
             for version in pkg_cls.versions:
                 pkg = pkg_cls(version, ctx)
+                requested_pkgs.add((pkg.name, pkg.version))
                 visit(pkg)
         else:
             pkg = pkg_cls(spec.version, ctx)
+            requested_pkgs.add((pkg.name, pkg.version))
             visit(pkg)
 
-    return plan
+    return plan, requested_pkgs
 
 
 def cmd_install(ctx: Context):
-    plan = build_install_plan(ctx)
+    plan, requested_pkgs = build_install_plan(ctx)
 
     installed = 0
     skipped = 0
 
     if ctx.args.dry_run:
-        print("Install plan:")
-        for pkg in plan:
-            print(f"  {pkg.name}@{pkg.version}")
-        return
+        print(f"{'ACTION':<10} {'PACKAGE':<30} {'TYPE'}")
+        print(f"{'-'*10} {'-'*30} {'-'*10}")
 
     for pkg in plan:
-        print(f"\n==> {pkg.name}@{pkg.version}")
+        is_requested = (pkg.name, pkg.version) in requested_pkgs
+        force_this = (ctx.args.force >= 2 or ctx.args.force_deps) or (ctx.args.force >= 1 and is_requested)
+        should_run = not pkg.is_installed or force_this
 
-        if pkg.is_installed and not ctx.args.force:
-            print("Already installed, skipping (use -f/--force to reinstall)")
-            skipped += 1
+        if ctx.args.dry_run:
+            action = "install" if should_run else "skip"
+            pkg_type = "requested" if is_requested else "dependency"
+            package = f"{pkg.name}@{pkg.version}"
+            print(f"{action:<10} {package:<30} {pkg_type}")
+
+            if should_run:
+                installed += 1
+            else:
+                skipped += 1
+            continue
+
+        if not should_run:
+            if is_requested:
+                print(f"\n==> {pkg.name}@{pkg.version}")
+                print("Already installed, skipping (use -f/--force to reinstall)")
+                skipped += 1
             continue
 
         pkg.run()
         installed += 1
 
-    print(f"\nDone: {installed} installed" + (f", {skipped} skipped" if skipped else ""))
+    if ctx.args.dry_run:
+        print(f"\nWould install {installed} package(s)")
+        if skipped:
+            print(f"Would skip {skipped} package(s) in the install plan")
+
+            if ctx.args.force == 0 and not ctx.args.force_deps:
+                print(
+                    "\nUse -f/--force to reinstall requested packages, or -ff/--force-deps to also reinstall dependencies."
+                )
+        return
+
+    print(f"\nDone: {installed} installed" + (f", {skipped} requested package(s) skipped" if skipped else ""))
+
+
+def cmd_uninstall(ctx: Context):
+    targets = []
+    seen = set()
+
+    for package in ctx.args.packages:
+        spec = parse_spec(package)
+        pkg_cls = get_package(spec.name)
+
+        versions = pkg_cls.versions if spec.all_versions else [spec.version]
+
+        for version in versions:
+            pkg = pkg_cls(version, ctx)
+            key = (pkg.name, pkg.version)
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            targets.append(pkg)
+
+    to_remove = [pkg for pkg in targets if pkg.is_installed]
+
+    for pkg in targets:
+        if not pkg.is_installed:
+            log.warning("%s@%s is not installed, skipping", pkg.name, pkg.version)
+
+    if not to_remove:
+        log.warning("Nothing to uninstall")
+        return
+
+    if ctx.args.dry_run:
+        print("The following would be removed:")
+    else:
+        print("The following will be removed:")
+
+    print()
+
+    for pkg in to_remove:
+        print(f"{pkg.name}@{pkg.version}")
+
+        paths = [pkg.prefix, pkg.modulefile]
+        if ctx.args.purge:
+            paths.extend([pkg.download_path, pkg.build_path])
+
+        for path in paths:
+            if path.exists():
+                print(f"  {path}")
+
+        print()
+
+    if ctx.args.dry_run:
+        print(f"Would uninstall {len(to_remove)} package(s)")
+        return
+
+    if not ctx.args.yes:
+        answer = input("Proceed? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            return
+
+    for pkg in to_remove:
+        print(f"Uninstalling {pkg.name}@{pkg.version}")
+
+        if pkg.prefix.exists():
+            shutil.rmtree(pkg.prefix)
+        pkg.modulefile.unlink(missing_ok=True)
+
+        if ctx.args.purge:
+            if pkg.download_path.exists():
+                shutil.rmtree(pkg.download_path)
+            if pkg.build_path.exists():
+                shutil.rmtree(pkg.build_path)
+
+    print(f"\nDone: {len(to_remove)} uninstalled")
 
 
 def cmd_list(ctx: Context):
     load_all_packages()
 
     if not PACKAGE_REGISTRY:
-        print("No packages found in the registry.")
+        log.warning("No packages found in the registry.")
         return
 
     package_names = sorted(PACKAGE_REGISTRY.keys())
 
-    longest_name = max(len(n) for n in package_names) if package_names else 1
+    if not ctx.term.is_tty:
+        for name in package_names:
+            print(name)
+        return
+
+    longest_name = max(len(n) for n in package_names)
 
     MIN_COL_WIDTH = 20
     padding = 4
@@ -406,16 +506,12 @@ def cmd_list(ctx: Context):
     cols = max(1, ctx.term.columns // col_width)
     rows = math.ceil(len(package_names) / cols)
 
-    grid = []
     for r in range(rows):
         row = []
         for c in range(cols):
             idx = r + c * rows
             if idx < len(package_names):
                 row.append(package_names[idx].ljust(col_width))
-        grid.append(row)
-
-    for row in grid:
         print("".join(row))
 
 
@@ -465,39 +561,31 @@ def cmd_info(ctx: Context):
     print(output)
 
 
-def setup_logging(ctx: Context):
-    if ctx.debug:
-        level = logging.DEBUG
-    elif ctx.verbose:
-        level = logging.INFO
-    else:
-        level = logging.WARNING
-
-    logging.basicConfig(
-        level=level,
-        format="[%(levelname)s] %(message)s",
-        # format="[%(asctime)s] [%(levelname)s] %(message)s",
-        # datefmt="%H:%M:%S",
-    )
-
-
 def main():
     args = parse_args()
-
-    ctx = Context(args)
-
-    setup_logging(ctx)
-
-    ctx.log.debug("config file = %s", args.config)
+    term = TermInfo()
+    setup_logging(args, term)
 
     try:
+        xdg = get_xdg_dirs(APP_NAME)
+        config = Config(args.config)
+
+        ctx = Context(
+            args=args,
+            app_root=Path(__file__).resolve().parent,
+            xdg=xdg,
+            config=config,
+            term=term,
+        )
+        log.debug("using config file: %s", args.config)
+
         args.handler(ctx)
 
     except Exception as e:
-        if ctx.debug:
+        if args.debug:
             raise
 
-        ctx.log.error(f"{e}\nRun with --debug or -vv to see the full developer traceback.")
+        log.error(f"{e}\nRun with --debug or -vv for full traceback")
         sys.exit(1)
 
 

@@ -46,15 +46,32 @@ class MesonPackage(Package):
             [
                 "meson",
                 "setup",
-                str(self.build_path / "build"),
+                str(self.build_dir / "build"),
                 str(self.build_dir),
                 f"--prefix={self.prefix}",
                 *self.meson_args(),
-            ]
+            ],
+            cwd=self.build_dir,
         )
 
     def build(self):
-        self.run_cmd(["meson", "compile", "-C", str(self.build_path / "build")])
+        self.run_cmd(
+            [
+                "meson",
+                "compile",
+                "-C",
+                str(self.build_dir / "build"),
+            ],
+            cwd=self.build_dir,
+        )
 
     def install(self):
-        self.run_cmd(["meson", "install", "-C", str(self.build_path / "build")])
+        self.run_cmd(
+            [
+                "meson",
+                "install",
+                "-C",
+                str(self.build_dir / "build"),
+            ],
+            cwd=self.build_dir,
+        )

@@ -41,8 +41,22 @@ class Config:
             if not isinstance(value, str):
                 raise ValueError(f"paths.{key} must be a string")
 
-        self.software_root = expand_path(paths["software_root"])
-        self.container_root = expand_path(paths["container_root"])
+            path = expand_path(value)
+
+            if not path.exists():
+                raise FileNotFoundError(f"Missing directory for paths.{key}: {path}")
+
+            if not path.is_dir():
+                raise ValueError(f"paths.{key} is not a directory: {path}")
+
+            try:
+                test_file = path / ".write_test"
+                test_file.touch(exist_ok=True)
+                test_file.unlink()
+            except Exception as e:
+                raise PermissionError(f"Not writable: {path}") from e
+
+            setattr(self, key, path)
 
         build = data.get("build", {})
         jobs = build.get("jobs")

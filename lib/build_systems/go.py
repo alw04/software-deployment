@@ -33,7 +33,16 @@ class GoPackage(Package):
         )
 
     def build(self):
-        self.run_cmd(["go", "build", "-o", self.name, str(self.build_dir)], cwd=self.build_dir)
+        self.run_cmd(
+            [
+                "go",
+                "build",
+                "-o",
+                self.name,
+                str(self.build_dir),
+            ],
+            cwd=self.build_dir,
+        )
 
     def install(self):
         self.install_binary(self.build_dir / self.name)

@@ -33,7 +33,6 @@ class PythonPackage(Package):
 
     def create_venv(self):
         self.run_cmd(["python3", "-m", "venv", "--clear", str(self.prefix)])
-
         self.run_cmd([str(self.venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
 
     def install(self):
@@ -62,5 +61,4 @@ class PythonSourcePackage(PythonPackage):
 
     def install(self):
         self.create_venv()
-
         self.run_cmd([str(self.venv_python), "-m", "pip", "install", "."], cwd=self.build_dir)

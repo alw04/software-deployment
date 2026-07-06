@@ -3,7 +3,7 @@ class SDError(Exception):
 
 
 class PackageNotFoundError(SDError):
-    def __init__(self, name, required_by=None):
+    def __init__(self, name: str, required_by: str | None = None):
         msg = f"Package '{name}' not found"
         if required_by:
             msg += f" (required by '{required_by}')"
@@ -11,6 +11,6 @@ class PackageNotFoundError(SDError):
 
 
 class UndeclaredDependencyError(SDError):
-    def __init__(self, package_name, dep_name):
+    def __init__(self, package_name: str, dep_name: str):
         msg = f"Package '{package_name}' tried to use undeclared dependency '{dep_name}'"
         super().__init__(msg)

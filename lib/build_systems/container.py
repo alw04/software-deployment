@@ -42,7 +42,7 @@ class ContainerPackage(Package):
         self.image_path.parent.mkdir(parents=True, exist_ok=True)
 
         if self.image_path.is_file() and not self.ctx.args.force:
-            self.log.info("skipping pull, image already exists: %s", self.image_path)
+            self.log.info("skipping pull (already exists): %s", self.image_path)
             return
 
         tmp_image = self.image_path.with_name(self.image_path.name + ".tmp")
@@ -50,7 +50,7 @@ class ContainerPackage(Package):
         if tmp_image.exists():
             tmp_image.unlink()
 
-        self.log.info("pulling container image: %s -> %s", image_ref, self.image_path)
+        self.log.info("pulling image: %s -> %s", image_ref, self.image_path)
 
         cmd = ["apptainer", "pull"]
         if self.ctx.args.force:
@@ -61,11 +61,6 @@ class ContainerPackage(Package):
         try:
             self.run_cmd(cmd)
             tmp_image.replace(self.image_path)
-            self.log.info("container pull complete")
 
         finally:
-            if tmp_image.exists():
-                try:
-                    tmp_image.unlink()
-                except OSError:
-                    pass
+            tmp_image.unlink(missing_ok=True)

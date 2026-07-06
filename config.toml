@@ -3,3 +3,4 @@ software_root = "/software/el9-dev"
 container_root = "/reference/containers-dev"
 
 [build]
+# jobs = 8

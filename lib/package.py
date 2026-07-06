@@ -1,4 +1,5 @@
 import inspect
+import logging
 import os
 import re
 import shutil
@@ -28,7 +29,7 @@ class Package:
 
     @property
     def log(self):
-        return self.ctx.log
+        return logging.getLogger(f"{self.name}@{self.version}")
 
     homepage: str | None = None
     url: str | None = None
@@ -183,7 +184,7 @@ class Package:
                 for var, paths in additional.items():
                     for path in paths:
                         if not path.exists():
-                            self.log.warning(f"skipping missing env path: {var} -> {path}")
+                            self.log.warning("skipping env path (missing) for %s: %s", var, path)
                             continue
 
                         self.prepend_env(var, str(path), sep=":")
@@ -219,7 +220,7 @@ class Package:
         )
         # fmt: on
 
-        if self.ctx.debug:
+        if self.ctx.args.debug:
             subprocess.run(
                 args,
                 cwd=cwd,
@@ -368,7 +369,7 @@ class Package:
         self.download_path.mkdir(parents=True, exist_ok=True)
 
         if self.download_file.is_file() and not self.ctx.args.force:
-            self.log.info("skipping download, file already exists: %s", self.download_file)
+            self.log.info("skipping download (already exists): %s", self.download_file)
             return
 
         tmp = self.download_file.with_name(self.download_file.name + ".part")
@@ -389,14 +390,13 @@ class Package:
                             f.write(chunk)
 
             tmp.replace(self.download_file)
-            self.log.info("download complete")
 
         finally:
             tmp.unlink(missing_ok=True)
 
     def extract(self):
         if self.build_path.exists() and not self.ctx.args.force:
-            self.log.info("skipping extract, build directory already exists: %s", self.build_path)
+            self.log.info("skipping extract (already exists): %s", self.build_path)
             return
 
         tmp_dir = self.build_path.with_name(self.build_path.name + ".tmp")
@@ -489,12 +489,11 @@ class Package:
 
             else:
                 raise RuntimeError(
-                    f"Unsupported archive format for {self.name}@{self.version}\n" f"File: {self.download_file}"
+                    f"{self.name}@{self.version}: unsupported archive format for file: {self.download_file}"
                 )
 
             shutil.rmtree(self.build_path, ignore_errors=True)
             tmp_dir.replace(self.build_path)
-            self.log.info("extract complete")
 
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -546,7 +545,7 @@ class Package:
             for var, path_list in prepend_paths.items():
                 for path in path_list:
                     if not path.exists():
-                        self.log.warning(f"skipping missing module path: {var} -> {path}")
+                        self.log.warning("skipping module path (missing) for %s: %s", var, path)
                         continue
 
                     module_paths.append((var, path))
@@ -605,6 +604,8 @@ class Package:
         self.log.info("wrote modulefile to %s", self.modulefile)
 
     def run(self):
+        print(f"\n==> {self.name}@{self.version}")
+
         self.apply_build_env_from_deps()
         self.apply_toolchain_env()
 

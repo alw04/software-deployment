@@ -56,14 +56,31 @@ class CMakePackage(Package):
                 "-S",
                 str(self.build_dir),
                 "-B",
-                str(self.build_path / "build"),
+                str(self.build_dir / "build"),
                 f"-DCMAKE_INSTALL_PREFIX={self.prefix}",
                 *self.cmake_args(),
             ],
+            cwd=self.build_dir,
         )
 
     def build(self):
-        self.run_cmd(["cmake", "--build", str(self.build_path / "build"), "--parallel", str(self.build_jobs)])
+        self.run_cmd(
+            [
+                "cmake",
+                "--build",
+                str(self.build_dir / "build"),
+                "--parallel",
+                str(self.build_jobs),
+            ],
+            cwd=self.build_dir,
+        )
 
     def install(self):
-        self.run_cmd(["cmake", "--install", str(self.build_path / "build")])
+        self.run_cmd(
+            [
+                "cmake",
+                "--install",
+                str(self.build_dir / "build"),
+            ],
+            cwd=self.build_dir,
+        )
