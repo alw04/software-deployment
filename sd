@@ -565,6 +565,7 @@ def main():
     args = parse_args()
     term = TermInfo()
     setup_logging(args, term)
+    log.debug("loading configuration from %s", args.config.expanduser())
 
     try:
         xdg = get_xdg_dirs(APP_NAME)
@@ -577,15 +578,14 @@ def main():
             config=config,
             term=term,
         )
-        log.debug("using config file: %s", args.config)
-
         args.handler(ctx)
 
     except Exception as e:
         if args.debug:
             raise
 
-        log.error(f"{e}\nRun with --debug or -vv for full traceback")
+        log.error("%s", e)
+        print("Run with --debug or -vv for full traceback")
         sys.exit(1)
 
 

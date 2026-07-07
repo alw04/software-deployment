@@ -15,8 +15,8 @@ def get_xdg_dirs(app_name: str) -> XdgDirs:
     home = Path.home()
 
     return XdgDirs(
-        config_dir=Path(os.getenv("XDG_CONFIG_HOME", home / ".config")) / app_name,
-        cache_dir=Path(os.getenv("XDG_CACHE_HOME", home / ".cache")) / app_name,
-        state_dir=Path(os.getenv("XDG_STATE_HOME", home / ".local" / "state")) / app_name,
-        data_dir=Path(os.getenv("XDG_DATA_HOME", home / ".local" / "share")) / app_name,
+        config_dir=Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / app_name,
+        cache_dir=Path(os.environ.get("XDG_CACHE_HOME", home / ".cache")) / app_name,
+        state_dir=Path(os.environ.get("XDG_STATE_HOME", home / ".local" / "state")) / app_name,
+        data_dir=Path(os.environ.get("XDG_DATA_HOME", home / ".local" / "share")) / app_name,
     )

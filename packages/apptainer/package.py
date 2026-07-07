@@ -22,6 +22,22 @@ class Apptainer(AutotoolsPackage):
         Dependency("squashfuse"),
     ]
 
+    def apply_toolchain_env(self):
+        super().apply_toolchain_env()
+
+        gopath = self.build_dir / ".gopath"
+        gomodcache = self.build_dir / ".gomodcache"
+        gocache = self.build_dir / ".gocache"
+        for d in (gopath, gomodcache, gocache):
+            d.mkdir(parents=True, exist_ok=True)
+        self.env.update(
+            {
+                "GOPATH": str(gopath),
+                "GOMODCACHE": str(gomodcache),
+                "GOCACHE": str(gocache),
+            }
+        )
+
     def configure(self):
         self.run_cmd(
             [
@@ -39,3 +55,10 @@ class Apptainer(AutotoolsPackage):
 
     def install(self):
         self.run_cmd(["make", "-C", "./builddir", "install"], cwd=self.build_dir)
+
+        libexec_bin = self.prefix / "libexec" / "apptainer" / "bin"
+
+        self.install_file(self.dep("gocryptfs").prefix / "bin" / "gocryptfs", libexec_bin / "gocryptfs", mode=0o755)
+        self.install_file(
+            self.dep("squashfuse").prefix / "bin" / "squashfuse_ll", libexec_bin / "squashfuse_ll", mode=0o755
+        )

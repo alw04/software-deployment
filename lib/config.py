@@ -3,15 +3,6 @@ import tomllib
 from pathlib import Path
 
 
-def expand_path(value: str) -> Path:
-    expanded = os.path.expandvars(value)
-
-    if "$" in expanded:
-        raise ValueError(f"Unexpanded environment variable in path: {value}")
-
-    return Path(expanded).expanduser()
-
-
 class Config:
     APPS_DIR = "apps"
     DOWNLOADS_DIR = "downloads"
@@ -21,6 +12,8 @@ class Config:
     IMAGES_DIR = "images"
 
     def __init__(self, path: Path):
+        path = path.expanduser()
+
         if not path.is_file():
             raise FileNotFoundError(f"Config file not found: {path}")
 
@@ -41,7 +34,7 @@ class Config:
             if not isinstance(value, str):
                 raise ValueError(f"paths.{key} must be a string")
 
-            path = expand_path(value)
+            path = Path(os.path.expandvars(value)).expanduser()
 
             if not path.exists():
                 raise FileNotFoundError(f"Missing directory for paths.{key}: {path}")
