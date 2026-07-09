@@ -27,7 +27,7 @@ class ContainerPackage(Package):
     def image_path(self) -> Path:
         return self.prefix / f"{self.name}_{self.version}.sif"
 
-    def format_shell_command(self, cmd: str) -> str:
+    def format_shell_function(self, cmd: str) -> str:
         return f"apptainer exec {self.image_path} {cmd}"
 
     def image_for_version(self, version: str) -> str:
@@ -56,7 +56,7 @@ class ContainerPackage(Package):
         if self.ctx.args.force:
             cmd.append("--force")
 
-        cmd += [str(tmp_image), image_ref]
+        cmd.extend([str(tmp_image), image_ref])
 
         try:
             self.run_cmd(cmd)

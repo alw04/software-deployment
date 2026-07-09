@@ -21,7 +21,7 @@ class Atlas(AutotoolsPackage):  # Not Autotools, but follows a similar workflow
         Dependency("openblas"),
     ]
 
-    jobs = 1
+    max_jobs = 1
 
     source_subdir = "build"
 

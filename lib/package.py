@@ -35,7 +35,7 @@ class Package:
     url: str | None = None
     urls_by_version: dict[str, str] | None = None
     versions: list[str] = []
-    jobs: int | None = None
+    max_jobs: int | None = None
 
     @property
     def name(self) -> str:
@@ -70,8 +70,8 @@ class Package:
             versions = ", ".join(f"{v} (default)" if v == default else v for v in self.versions)
             raise ValueError(f"{self.name}: unsupported version {version!r}.\nAvailable versions: {versions}")
 
-        if self.jobs is not None and (not isinstance(self.jobs, int) or self.jobs < 1):
-            raise ValueError(f"{self.name}: jobs must be an integer >= 1 (got {self.jobs!r})")
+        if self.max_jobs is not None and (not isinstance(self.max_jobs, int) or self.max_jobs < 1):
+            raise ValueError(f"{self.name}: max_jobs must be an integer >= 1 (got {self.max_jobs!r})")
 
         self.version = version
         self.ctx = ctx
@@ -156,7 +156,9 @@ class Package:
 
     @property
     def build_jobs(self) -> int:
-        return self.jobs or self.ctx.config.jobs
+        if self.max_jobs is None:
+            return self.ctx.config.jobs
+        return min(self.max_jobs, self.ctx.config.jobs)
 
     def append_env(self, key: str, value: str, sep: str = " "):
         existing = self.env.get(key)
@@ -285,7 +287,10 @@ class Package:
                 self.log.error(msg)
                 raise
 
-    def install_file(self, src: Path, dst: Path, mode: int | None = None):
+    def install_file(self, src: str | Path, dst: str | Path, mode: int | None = None):
+        src = Path(src)
+        dst = Path(dst)
+
         dst.parent.mkdir(parents=True, exist_ok=True)
 
         tmp = dst.with_name(dst.name + ".tmp")
@@ -298,11 +303,16 @@ class Package:
 
         tmp.replace(dst)
 
-    def install_binary(self, src: Path, name: str | None = None):
+    def install_binary(self, src: str | Path, name: str | None = None):
+        src = Path(src)
+
         dst = self.prefix / "bin" / (name or src.name)
         self.install_file(src, dst, mode=0o755)
 
-    def install_symlink(self, target: str | Path, link: Path):
+    def install_symlink(self, target: str | Path, link: str | Path):
+        target = Path(target)
+        link = Path(link)
+
         link.parent.mkdir(parents=True, exist_ok=True)
 
         tmp = link.with_name(link.name + ".tmp")
@@ -310,7 +320,10 @@ class Package:
         tmp.symlink_to(target)
         tmp.replace(link)
 
-    def install_directory(self, src: Path, dst: Path):
+    def install_directory(self, src: str | Path, dst: str | Path):
+        src = Path(src)
+        dst = Path(dst)
+
         tmp = dst.with_name(dst.name + ".tmp")
 
         try:
@@ -345,7 +358,7 @@ class Package:
             f"{self.name}: no download URL source defined (set 'url', 'urls_by_version', or override url_for_version()"
         )
 
-    phases: tuple = (
+    phases: tuple[str, ...] = (
         "download",
         "extract",
         "configure",
@@ -557,14 +570,14 @@ class Package:
 
     shell_functions: dict[str, str] = {}
 
-    def format_shell_command(self, cmd: str) -> str:
+    def format_shell_function(self, cmd: str) -> str:
         return cmd
 
     def render_shell_functions(self) -> dict[str, dict[str, str]]:
         out = {}
 
         for name, cmd in self.shell_functions.items():
-            cmd = self.format_shell_command(cmd)
+            cmd = self.format_shell_function(cmd)
 
             out[name] = {
                 "bash": f'{cmd} "$@"',

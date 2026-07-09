@@ -27,22 +27,15 @@ log = logging.getLogger(APP_NAME)
 
 
 def parse_args() -> argparse.Namespace:
-    global_opts = argparse.ArgumentParser(add_help=False)
-    global_opts.add_argument(
-        "--config",
-        default=Path(__file__).with_name("config.toml"),
-        type=Path,
-        metavar="PATH",
-        help="Path to config file",
-    )
-    global_opts.add_argument(
+    common_opts = argparse.ArgumentParser(add_help=False)
+    common_opts.add_argument(
         "-v",
         "--verbose",
         action="count",
         default=0,
         help="Increase output verbosity (-v for verbose, -vv for debug)",
     )
-    global_opts.add_argument(
+    common_opts.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug output (equivalent to -vv)",
@@ -86,7 +79,13 @@ def parse_args() -> argparse.Namespace:
                 %(prog)s modules regenerate --all --dry-run
             """
         ),
-        # parents=[global_opts],
+    )
+    parser.add_argument(
+        "--config",
+        default=Path(__file__).with_name("config.toml"),
+        type=Path,
+        metavar="PATH",
+        help="Path to config file",
     )
 
     subparser = parser.add_subparsers(dest="command")
@@ -95,7 +94,7 @@ def parse_args() -> argparse.Namespace:
         "install",
         help="Install one or more packages",
         description="Install packages and their dependencies",
-        parents=[global_opts],
+        parents=[common_opts],
     )
     install_parser.add_argument(
         "packages",
@@ -126,13 +125,13 @@ def parse_args() -> argparse.Namespace:
         "uninstall",
         help="Uninstall one or more packages",
         description="Remove an installed package's install prefix and modulefile",
-        parents=[global_opts],
+        parents=[common_opts],
     )
     uninstall_parser.add_argument(
         "packages",
         nargs="+",
         metavar="package[@version]",
-        help="Package(s) to uninstall (e.g. r-ggplot2@4.0.3",
+        help="Package(s) to uninstall (e.g. r-ggplot2@4.0.3)",
     )
     uninstall_parser.add_argument(
         "--purge",
@@ -156,7 +155,7 @@ def parse_args() -> argparse.Namespace:
         "list",
         help="List available packages in the registry",
         description="List available packages in the registry",
-        parents=[global_opts],
+        parents=[common_opts],
     )
     list_parser.set_defaults(handler=cmd_list)
 
@@ -164,7 +163,7 @@ def parse_args() -> argparse.Namespace:
         "info",
         help="Show package details",
         description="Display metadata about a package including versions, description, and homepage",
-        parents=[global_opts],
+        parents=[common_opts],
     )
     info_parser.add_argument(
         "package",
@@ -185,7 +184,7 @@ def parse_args() -> argparse.Namespace:
         "regenerate",
         help="Regenerate modulefiles for selected packages",
         description="Regenerate modulefiles for selected packages",
-        parents=[global_opts],
+        parents=[common_opts],
     )
     modules_regenerate.add_argument(
         "packages",

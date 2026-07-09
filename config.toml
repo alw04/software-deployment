@@ -1,6 +1,10 @@
 [paths]
+# Root directory for installed software, source downloads, build directories, and generated modulefiles.
 software_root = "/software/el9-dev"
+
+# Root directory for Apptainer/Singularity container images and generated modulefiles.
 container_root = "/reference/containers-dev"
 
 [build]
+# Number of parallel jobs for builds. If omitted, uses all available CPUs.
 # jobs = 8
