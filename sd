@@ -66,8 +66,7 @@ def parse_args() -> argparse.Namespace:
                 %(prog)s list
 
                 # Inspect package metadata and dependencies
-                %(prog)s info python
-                %(prog)s info r@4.5.1
+                %(prog)s info gcc
 
                 # Regenerate modulefiles for all installed packages
                 %(prog)s modules regenerate --all
@@ -252,6 +251,9 @@ def cmd_modules_regenerate(ctx: Context):
             pkg_cls = get_package(spec.name)
 
             if spec.all_versions:
+                if not pkg_cls.versions:
+                    raise ValueError(f"{spec.name}: package defines no versions")
+
                 found = False
 
                 for version in pkg_cls.versions:
@@ -285,7 +287,7 @@ def cmd_modules_regenerate(ctx: Context):
         if ctx.args.dry_run:
             continue
 
-        for dep in pkg.dependencies_spec():
+        for dep in pkg.resolved_dependencies_spec():
             dep_cls = get_package(dep.name, required_by=pkg.name)
             dep_pkg = dep_cls(dep.version, ctx)
 
@@ -323,7 +325,7 @@ def build_install_plan(ctx: Context) -> tuple[list[Package], set[tuple[str, str]
         stack.append(key)
 
         try:
-            for dep in pkg.dependencies_spec():
+            for dep in pkg.resolved_dependencies_spec():
                 dep_cls = get_package(dep.name, required_by=pkg.name)
                 dep_pkg = dep_cls(dep.version, ctx)
 
@@ -343,6 +345,9 @@ def build_install_plan(ctx: Context) -> tuple[list[Package], set[tuple[str, str]
         pkg_cls = get_package(spec.name)
 
         if spec.all_versions:
+            if not pkg_cls.versions:
+                raise ValueError(f"{spec.name}: package defines no versions")
+
             for version in pkg_cls.versions:
                 pkg = pkg_cls(version, ctx)
                 requested_pkgs.add((pkg.name, pkg.version))
@@ -413,6 +418,9 @@ def cmd_uninstall(ctx: Context):
     for package in ctx.args.packages:
         spec = parse_spec(package)
         pkg_cls = get_package(spec.name)
+
+        if spec.all_versions and not pkg_cls.versions:
+            raise ValueError(f"{spec.name}: package defines no versions")
 
         versions = pkg_cls.versions if spec.all_versions else [spec.version]
 
@@ -522,38 +530,75 @@ def cmd_info(ctx: Context):
     INDENT = "    "
 
     try:
-        default_version = pkg_cls.default_version()
+        default_version = f"{term.cyan}{pkg_cls.default_version()}{term.reset}"
     except ValueError:
-        default_version = "undefined"
+        default_version = f"{term.red}{term.bold}(no default version){term.reset}"
 
     homepage = pkg_cls.homepage or "(none)"
 
     description = (pkg_cls.description() or "(none)").replace("\n", f"\n{INDENT}")
 
-    versions = "\n".join(f"{INDENT}{v}" for v in pkg_cls.versions) if pkg_cls.versions else f"{INDENT}(none)"
-
-    deps = (
-        "\n".join(f"{INDENT}{d.name} [{', '.join(d.types)}]" for d in pkg_cls.dependencies_spec())
-        if pkg_cls.dependencies_spec()
-        else f"{INDENT}(none)"
+    versions = (
+        "\n".join(f"{INDENT}{term.cyan}{v}{term.reset}" for v in pkg_cls.versions)
+        if pkg_cls.versions
+        else f"{INDENT}{term.red}{term.bold}(no versions defined){term.reset}"
     )
 
-    output = f"""\
-{term.cyan}Package:{term.reset} {spec.name}
+    deps = []
 
-{term.cyan}Description:{term.reset}
+    dep_type_colors = {
+        "build": term.green,
+        "link": term.cyan,
+        "run": term.blue,
+    }
+
+    for dep in pkg_cls.dependencies_spec():
+        dep_lines = []
+
+        dep_version = dep.version
+
+        if dep_version is None:
+            try:
+                dep_version = get_package(dep.name).default_version()
+            except ValueError:
+                dep_version = None
+
+        if dep_version:
+            name = f"{dep.name}{term.cyan}@{dep_version}{term.reset}"
+        else:
+            name = f"{dep.name} {term.red}{term.bold}(no default version){term.reset}"
+
+        types = ", ".join(f"{dep_type_colors.get(dep_type, '')}{dep_type}{term.reset}" for dep_type in dep.types)
+
+        dep_lines.append(f"{INDENT}{name:<36} {types}")
+
+        if dep.when is not None:
+            when_versions = dep.when if isinstance(dep.when, tuple) else (dep.when,)
+
+            when = ", ".join(f"{term.cyan}{spec.name}@{v}{term.reset}" for v in when_versions)
+
+            dep_lines.append(f"  {INDENT}{term.blue}when:{term.reset} {when}")
+
+        deps.append("\n".join(dep_lines))
+
+    deps = "\n\n".join(deps) if deps else f"{INDENT}(none)"
+
+    output = f"""\
+{term.blue}{term.bold}Package:{term.reset} {spec.name}
+
+{term.blue}{term.bold}Description:{term.reset}
     {description}
 
-{term.cyan}Homepage:{term.reset}
+{term.blue}{term.bold}Homepage:{term.reset}
     {homepage}
 
-{term.cyan}Default Version:{term.reset}
+{term.blue}{term.bold}Default Version:{term.reset}
     {default_version}
 
-{term.cyan}Versions:{term.reset}
+{term.blue}{term.bold}Versions:{term.reset}
 {versions}
 
-{term.cyan}Dependencies:{term.reset}
+{term.blue}{term.bold}Dependencies:{term.reset}
 {deps}
 """
 

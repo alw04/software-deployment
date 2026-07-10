@@ -39,7 +39,7 @@ class Package:
 
     @property
     def name(self) -> str:
-        return self.__class__.__module__.rsplit(".", 1)[-1].lower()
+        return type(self).__module__.rsplit(".", 1)[-1].lower()
 
     @classmethod
     def description(cls) -> str | None:
@@ -58,7 +58,7 @@ class Package:
     @classmethod
     def default_version(cls) -> str:
         if not cls.versions:
-            raise ValueError(f"{cls.__name__} defines no versions")
+            raise ValueError(f"{cls.__name__.lower()}: package defines no versions")
         return cls.versions[0]
 
     def __init__(self, version, ctx):
@@ -67,8 +67,8 @@ class Package:
 
         if version not in self.versions:
             default = self.default_version()
-            versions = ", ".join(f"{v} (default)" if v == default else v for v in self.versions)
-            raise ValueError(f"{self.name}: unsupported version {version!r}.\nAvailable versions: {versions}")
+            versions = "\n".join(f"  {v} (default)" if v == default else f"  {v}" for v in self.versions)
+            raise ValueError(f"{self.name}: unsupported version {version!r}.\nAvailable versions:\n{versions}")
 
         if self.max_jobs is not None and (not isinstance(self.max_jobs, int) or self.max_jobs < 1):
             raise ValueError(f"{self.name}: max_jobs must be an integer >= 1 (got {self.max_jobs!r})")
@@ -89,23 +89,50 @@ class Package:
 
         for base in reversed(cls.__mro__):
             for dep in getattr(base, "depends_on", []):
-                if dep.name in seen:
+                key = (dep.name, dep.version)
+
+                if key in seen:
                     continue
-                seen.add(dep.name)
+
+                seen.add(key)
                 deps.append(dep)
+
         return deps
+
+    def resolved_dependencies_spec(self) -> list[Dependency]:
+        return [dep for dep in self.dependencies_spec() if dep.applies_to(self)]
+
+    def dependencies_by_type(self, dep_type: str) -> list["Package"]:
+        return [self.dependencies[dep.name] for dep in self.resolved_dependencies_spec() if dep_type in dep.types]
 
     @property
     def build_dependencies(self) -> list["Package"]:
-        return [self.dependencies[dep.name] for dep in self.dependencies_spec() if "build" in dep.types]
+        return self.dependencies_by_type("build")
 
     @property
     def link_dependencies(self) -> list["Package"]:
-        return [self.dependencies[dep.name] for dep in self.dependencies_spec() if "link" in dep.types]
+        return self.dependencies_by_type("link")
 
     @property
     def run_dependencies(self) -> list["Package"]:
-        return [self.dependencies[dep.name] for dep in self.dependencies_spec() if "run" in dep.types]
+        return self.dependencies_by_type("run")
+
+    @property
+    def modulefile_dependencies(self) -> list[str]:
+        deps = []
+
+        for dep in self.resolved_dependencies_spec():
+            if "run" not in dep.types:
+                continue
+
+            pkg = self.dependencies[dep.name]
+
+            if dep.version:
+                deps.append(f"{pkg.name}/{dep.version}")
+            else:
+                deps.append(pkg.name)
+
+        return deps
 
     def dep(self, name: str) -> "Package":
         try:
@@ -549,7 +576,7 @@ class Package:
             if full_path.exists():
                 module_paths.append((var, full_path))
 
-        for base in reversed(self.__class__.__mro__):
+        for base in reversed(type(self).__mro__):
             if "modulefile_prepend_path" not in base.__dict__:
                 continue
 
@@ -601,7 +628,7 @@ class Package:
             "description": desc,
             "short_description": self.short_description(),
             "homepage": self.homepage or "(none)",
-            "dependencies": [dep.name for dep in self.run_dependencies],
+            "dependencies": self.modulefile_dependencies,
             "conflicts": self.conflicts_spec(),
             "paths": self.module_paths,
             "env": self.modulefile_setenv(),

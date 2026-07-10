@@ -106,7 +106,9 @@ class RPackage(Package):
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            self.run_cmd([str(self.r), "CMD", "INSTALL", f"--library={tmp_dir}", "."], cwd=self.build_dir)
+            self.run_cmd(
+                [str(self.r), "CMD", "INSTALL", f"--library={tmp_dir}", str(self.build_dir)], cwd=self.build_dir
+            )
 
             shutil.rmtree(self.libdir, ignore_errors=True)
             self.libdir.parent.mkdir(parents=True, exist_ok=True)

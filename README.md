@@ -305,14 +305,14 @@ Attributes defined on the package class to configure the package.
 | `url` | `str \| None ` | `None` | Download URL template. `{version}` is substituted at download time. |
 | `urls_by_version` | `dict[str, str] \| None` | `None` | Per-version download URLs, for packages that don't follow a consistent URL scheme. Takes priority over `url`. |
 | `versions` | `list[str]` | `[]` | List of supported versions. The first entry is the default version when no `@<version>` is provided. |
-| `max_jobs` | `int \| None` | `None` | Package-specific parallel job limit. The lower of `max_jobs` and the global `build.jobs` setting is used. |
+| `max_jobs` | `int \| None` | `None` | Package-specific parallel job limit. |
 | `depends_on` | `list[Dependency]` | `[]` | Dependencies required by this package. |
 | `conflicts` | `list[str]` | `[]` | Modules that cannot be loaded alongside this package. |
 | `shell_functions` | `dict[str, str]` | `{}` | Shell functions to expose in the generated modulefile. |
 | `source_subdir` | `str` | `"."` | Subdirectory within the extracted archive that contains the actual source. Useful for packages that nest their source inside a subdirectory. |
 | `download_headers` | `dict[str, str]` | `{}` | Additional HTTP headers to send when downloading source archives. |
 | `link_libs` | `list[str]` | `[]` | Additional libraries to link against (without the `-l` prefix) during the build. |
-| `phases` | `tuple[str, ...]` | `("download", "extract", "configure", "build", "install")` | Build phases executed for the package. Override for packages with a custom build flow. |
+| `phases` | `tuple[str, ...]` | `("download", "extract", "configure", "build", "install")` | Ordered build phases executed for the package. Override for packages with a custom build flow. |
 | `abstract` | `bool` | `False` | If `True`, prevents the class from being registered in the package registry. Used for base classes and build-system classes. |
 
 #### Properties
@@ -321,16 +321,12 @@ Values available when a package is being built or installed.
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `name` | `str` | Package name derived from the package directory name. |
 | `version` | `str` | Version this package instance was constructed with. |
 | `prefix` | `Path` | Installation prefix. |
 | `build_path` | `Path` | Directory used for build files. |
 | `build_dir` | `Path` | Source directory used during the build (`build_path / source_subdir`). |
 | `download_file` | `Path` | Path to the downloaded source file. |
-| `build_jobs` | `int` | Number of parallel build jobs. |
-| `build_dependencies` | `list[Package]` | Resolved dependencies of type `"build"`. |
-| `link_dependencies` | `list[Package]` | Resolved dependencies of type `"link"`. |
-| `run_dependencies` | `list[Package]` | Resolved dependencies of type `"run"`. |
+| `build_jobs` | `int` | Number of parallel build jobs. The lower of `max_jobs` and the global `build.jobs` setting is used. |
 
 #### Overridable methods
 
@@ -634,11 +630,14 @@ from lib.dependency import Dependency
 
 depends_on = [
     Dependency("zlib@1.3.1"),                   # link dependency (default)
-    Dependency("cmake@3.30.9", type="build"),   # build-only dependency
+    Dependency("cmake@3.30.9", type="build"),   # build dependency
     Dependency("python", type="run"),           # runtime dependency
     Dependency("mpi", type=("link", "run")),    # multiple dependency types
+    Dependency("openssl@3.4.1", when="2.1.0"),  # version-specific dependency
 ]
 ```
+
+A dependency version can by pinned by including `@<version>` in the dependency specification. If no version is specified, the dependency's default version is used (the first entry in its `versions` list).
 
 A dependency type can be a single string or a tuple of types when a dependency serves multiple purposes.
 
@@ -648,13 +647,7 @@ A dependency type can be a single string or a tuple of types when a dependency s
 | `build` | Dependency required only while building the package. Its `bin/` directory is added to `PATH` during the build. Build-system classes may provide additional build environment variables through `additional_build_env()`. |
 | `run` | Dependency required when using the installed package. Added to the generated modulefile dependencies so it is loaded automatically at runtime. |
 
-Dependency versions can by pinned by including a version in the dependency specification:
-
-```python
-Dependency("zlib@1.3.1")
-```
-
-If no version is specified, the dependency's default version is used (first entry in its `versions` list).
+Dependencies can also be conditional using the `when` argument. A dependency is included only when the package version matches one of the specified versions. `when` accepts either a single version string or a tuple of version strings.
 
 Resolved dependencies can be accessed using the `dep()` helper:
 

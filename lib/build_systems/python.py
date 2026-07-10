@@ -61,4 +61,4 @@ class PythonSourcePackage(PythonPackage):
 
     def install(self):
         self.create_venv()
-        self.run_cmd([str(self.venv_python), "-m", "pip", "install", "."], cwd=self.build_dir)
+        self.run_cmd([str(self.venv_python), "-m", "pip", "install", str(self.build_dir)], cwd=self.build_dir)
